@@ -188,9 +188,77 @@ hud = "auto"  #@param ["auto", "off", "gta5", "gta6", "generic"]
 zoom = "off"  #@param ["off", "light", "medium", "strong"]
 remove_fillers = False  #@param {type:"boolean"}
 enhance_speech = "off"  #@param ["off", "light", "strong"]
+#@markdown **Facecam and gameplay crops, chosen per clip.** `cam_fit`: how close the facecam panel frames the face
+#@markdown (`standard` = head and shoulders). `game_anchor`: `center` keeps the gameplay crop in the middle of the
+#@markdown screen, clear of the streamer. `cam_track`: when the cam moves or turns off inside a clip, the clip is
+#@markdown cut into parts with their own crops.
+cam_fit = "tight"  #@param ["standard", "tight", "close"]
+game_anchor = "center"  #@param ["side", "center"]
+cam_track = True  #@param {type:"boolean"}
+#@markdown Optional streamer name: their cam positions are saved in `MyDrive/StreamClipper/streamers/<name>.json`
+#@markdown and help when a clip's cam is not found. Leave empty for no profile.
+streamer = ""  #@param {type:"string"}
+#@markdown Clip length in seconds (pauses are trimmed after this, so a clip ends a bit shorter).
+min_dur = 15  #@param {type:"integer"}
+target_dur = 30  #@param {type:"integer"}
+max_dur = 60  #@param {type:"integer"}
 
 LLM = ("ollama" if globals().get("LLM_READY", False) else "none") if llm == "auto" else llm
 print("LLM:", LLM)
+from streamclipper.colab import streamer_profile_path
+
+PROFILE = streamer_profile_path(streamer) if globals().get("use_google_drive", True) else ""
+if PROFILE:
+    print("Streamer profile:", PROFILE)
+"""
+
+CELL_PREVIEW = """#@title 6b. Optional: preview the facecam and gameplay crops (renders nothing)
+#@markdown Run once with `correct_clip = 0`: it finds the clips (the saved transcript is reused) and shows, per clip,
+#@markdown the crops on the stream frame (red = facecam, cyan = gameplay) and the vertical clip they make.
+#@markdown To fix one clip: set `correct_clip` to its number, type the boxes as `x,y,width,height` in pixels of the
+#@markdown stream frame (read them off the yellow grid drawn on the frame), run again. Cell 7 then uses your boxes
+#@markdown for that clip only; every other clip keeps its automatic crop.
+correct_clip = 0  #@param {type:"integer"}
+correct_layout = "split"  #@param ["split", "full"]
+correct_cam = ""  #@param {type:"string"}
+correct_game = ""  #@param {type:"string"}
+from IPython.display import HTML, display
+
+from streamclipper.colab import correct_clip as _correct, drive_out_dir, preview_html, run_pipeline
+from streamclipper.util import ToolError
+
+OUT_DIR = drive_out_dir(output_folder)
+OVERRIDES = OUT_DIR / "layout_overrides.json"
+try:
+    if correct_clip:
+        fixed = _correct(str(OVERRIDES), correct_clip, correct_cam, correct_game, correct_layout, ratio)
+        display(HTML(preview_html([fixed])))
+    else:
+        prev = run_pipeline(
+            source=source,
+            out_dir=str(OUT_DIR),
+            preset=preset,
+            min_score=min_score,
+            max_clips=max_clips,
+            ratio=ratio,
+            llm=LLM,
+            llm_model=globals().get("llm_model", "") if LLM == "ollama" else "",
+            cookies=cookies_path,
+            hud=hud,
+            cam_fit=cam_fit,
+            game_anchor=game_anchor,
+            cam_track="auto" if cam_track else "off",
+            streamer_profile=PROFILE,
+            preview_only=True,
+            min_dur=min_dur,
+            target_dur=target_dur,
+            max_dur=max_dur,
+        )
+        display(HTML(preview_html(prev["preview"])))
+except ToolError as e:
+    print("ERROR:", e)
+    if e.hint:
+        print("Fix:", e.hint)
 """
 
 CELL_RUN = """#@title 7. Find and make the clips (resumes after a disconnect)
@@ -224,6 +292,16 @@ else:
             zoom=zoom,
             remove_fillers=remove_fillers,
             enhance_speech=enhance_speech,
+            cam_fit=cam_fit,
+            game_anchor=game_anchor,
+            cam_track="auto" if cam_track else "off",
+            streamer_profile=globals().get("PROFILE", ""),
+            layout_overrides=str(OUT_DIR / "layout_overrides.json")
+            if (OUT_DIR / "layout_overrides.json").is_file()
+            else "",
+            min_dur=min_dur,
+            target_dur=target_dur,
+            max_dur=max_dur,
         )
         if result and share_on_drive:
             share_run(result)
@@ -344,6 +422,7 @@ def build() -> nbformat.NotebookNode:
         CELL_DRIVE,
         CELL_INPUTS,
         CELL_OPTIONS,
+        CELL_PREVIEW,
         CELL_RUN,
         CELL_RESULTS,
         CELL_OUTPUTS,

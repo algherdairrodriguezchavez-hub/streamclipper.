@@ -296,11 +296,17 @@ def black_spans(video_path: Path, box: list, vw: int, vh: int, start: float, end
     ]
 
 
-def gameplay_box_avoiding(person: list, vw: int, vh: int, aspect: float, min_h: float = 0.75):
+GAME_ANCHORS = ("side", "center")
+
+
+def gameplay_box_avoiding(person: list, vw: int, vh: int, aspect: float, min_h: float = 0.75, anchor: str = "side"):
     """
-    Largest aspect-correct gameplay crop (normalised [x0, y0, x1, y1]) that does not overlap the
-    person box (normalised), from the free regions left, right, above and below it; None when the best
-    one is shorter than min_h of the frame height (the caller then picks another layout).
+    Aspect-correct gameplay crop (normalised [x0, y0, x1, y1]) that does not overlap the person box
+    (normalised), from the free regions left, right, above and below it; None when the best one is shorter
+    than min_h of the frame height (the caller then picks another layout).
+    anchor 'side' (default): the largest crop, centred in its free region (it can sit far to one side).
+    anchor 'center': of the crops at least 90% as tall as the largest, the one closest to the frame centre,
+    each pushed as close to the centre as its region allows (the action of most games is in the middle).
     """
     px0, py0, px1, py1 = person
     regions = [
@@ -309,19 +315,26 @@ def gameplay_box_avoiding(person: list, vw: int, vh: int, aspect: float, min_h: 
         (0, 0, vw, int(py0 * vh) - 2),
         (0, int(py1 * vh + 0.999) + 2, vw, vh - int(py1 * vh + 0.999) - 2),
     ]
-    best = None
+    found = []
     for rx, ry, rw, rh in regions:
         if rw < 64 or rh < 64:
             continue
         cw, ch, x0, y0 = _fill_crop((rx, ry, rw, rh), vw, vh, aspect)
+        if anchor == "center":
+            x0, y0 = int(round(vw / 2 - cw / 2)), int(round(vh / 2 - ch / 2))
         # _fill_crop clamps to the frame; keep it inside the region
         x0 = max(rx, min(rx + rw - cw, x0))
         y0 = max(ry, min(ry + rh - ch, y0))
         if cw > rw or ch > rh:
             continue
-        if best is None or ch > best[1]:
-            best = (cw, ch, x0, y0)
-    if best is None or best[1] < min_h * vh:
+        found.append((cw, ch, x0, y0))
+    if not found:
+        return None
+    best = max(found, key=lambda c: c[1])
+    if anchor == "center":
+        tall = [c for c in found if c[1] >= 0.9 * best[1]]
+        best = min(tall, key=lambda c: abs(c[2] + c[0] / 2 - vw / 2) + abs(c[3] + c[1] / 2 - vh / 2))
+    if best[1] < min_h * vh:
         return None
     cw, ch, x0, y0 = best
     return [round(x0 / vw, 5), round(y0 / vh, 5), round((x0 + cw) / vw, 5), round((y0 + ch) / vh, 5)]

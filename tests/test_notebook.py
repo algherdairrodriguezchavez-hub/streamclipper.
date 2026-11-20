@@ -18,7 +18,7 @@ def test_notebook_is_valid():
 
 def test_code_cells_compile():
     code = [c for c in _nb().cells if c.cell_type == "code"]
-    assert len(code) == 10
+    assert len(code) == 11
     for i, cell in enumerate(code, start=1):
         lines = [ln for ln in cell.source.splitlines() if not ln.lstrip().startswith(("!", "%"))]
         compile("\n".join(lines), f"cell {i}", "exec")

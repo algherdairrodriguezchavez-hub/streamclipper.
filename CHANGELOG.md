@@ -1,4 +1,10 @@
 # Changelog
+## Unreleased
+### Added
+- Facecam and gameplay crops per clip: `--cam-fit standard|tight|close` frames the face closer inside the detected cam overlay; `--game-anchor side|center` keeps the gameplay crop in the middle of the screen, clear of the streamer and the cam overlay; `--cam-track auto` cuts a clip into parts with their own crops when the cam moves, changes size or turns off inside it (rendered with the reframe composite).
+- `--streamer-profile FILE`: cam positions seen per streamer (detected or corrected), used when a clip's cam is not detected and a face is found inside a known position; it also keeps the streamer's crop settings.
+- `--preview-only` writes `layout_preview/*.jpg` (crops on a pixel grid + a mock of the vertical clip) and `layout_overrides.json`; `--layout-overrides FILE` renders the clips marked `"auto": false` with their own boxes, matched on start time.
+- Colab: cell 6 has `cam_fit`, `game_anchor`, `cam_track`, `streamer` and the clip length (`min_dur`, `target_dur`, `max_dur`); new cell 6b previews the crops and corrects one clip from a form. `run_pipeline` takes the same options.
 ## 5.3.0 (2026-11-19)
 ### Added
 - Game HUD detection: `--hud auto|off|gta5|gta6|generic` and `--hud-profile FILE` on `discover-clips` and `clip-stream`. The GTA V profile finds WASTED, BUSTED, MISSION PASSED, MISSION FAILED and 3+ wanted stars (test videos: precision 1.00, recall 0.71); `gta6` is experimental; `generic` looks for big text, flashes and kill-feed bursts. Events add a `hud` score component and reasons such as "WASTED on screen". OCR uses a PaddleOCR ONNX model downloaded once (SHA-256 checked).

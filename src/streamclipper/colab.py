@@ -149,9 +149,28 @@ def _clip_argv(source: str, work: Path, o: dict) -> list:
         argv += ["--brand-kit", str(o["brand_kit"])]
     if (o.get("hud") or "auto") != "auto":
         argv += ["--hud", str(o["hud"])]
-    if o["render"]:
+    # 5.4 per-clip crops and clip length: only passed when not the default, so older callers get the same argv
+    for flag, key, default in (
+        ("--cam-fit", "cam_fit", "standard"),
+        ("--game-anchor", "game_anchor", "side"),
+        ("--cam-track", "cam_track", "off"),
+    ):
+        if (o.get(key) or default) != default:
+            argv += [flag, str(o[key])]
+    for flag, key, default in (("--min-dur", "min_dur", 15.0), ("--target-dur", "target_dur", 30.0)):
+        if float(o.get(key, default)) != default:
+            argv += [flag, f"{float(o[key]):g}"]
+    if float(o.get("max_dur", 60.0)) != 60.0:
+        argv += ["--max-dur", f"{float(o['max_dur']):g}"]
+    if o.get("streamer_profile"):
+        argv += ["--streamer-profile", str(o["streamer_profile"])]
+    if o.get("layout_overrides"):
+        argv += ["--layout-overrides", str(o["layout_overrides"])]
+    if o.get("preview_only"):
+        argv.append("--preview-only")
+    if o["render"] and not o.get("preview_only"):
         argv.append("--render")
-    if o["drafts"]:
+    if o["drafts"] and not o.get("preview_only"):
         argv += ["--draft-root", str(o["draft_root"]), "--portable-drafts"]
     else:
         argv.append("--no-draft")
@@ -186,6 +205,15 @@ def run_pipeline(
     enhance_speech: str = "off",
     brand_kit: str = "",
     hud: str = "auto",
+    cam_fit: str = "standard",
+    game_anchor: str = "side",
+    cam_track: str = "off",
+    streamer_profile: str = "",
+    layout_overrides: str = "",
+    preview_only: bool = False,
+    min_dur: float = 15.0,
+    target_dur: float = 30.0,
+    max_dur: float = 60.0,
 ) -> dict:
     """
     Stream -> ranked clips (clips.json, clips.csv, index.html) -> MP4s + thumbnails (render) -> portable
@@ -194,6 +222,11 @@ def run_pipeline(
     max_clips = how many clips get an MP4/draft (0 = every clip above min_score; all clips go to clips.json).
     Effects (all off by default): zoom off|light|medium|strong, remove_fillers, enhance_speech off|light|strong,
     brand_kit = path of a brand kit JSON (e.g. on Drive). hud = auto|off|gta5|gta6|generic.
+    Crops per clip: cam_fit standard|tight|close, game_anchor side|center, cam_track off|auto, streamer_profile =
+    a JSON file of the streamer's cam positions (created/updated), layout_overrides = per-clip crops (the
+    layout_overrides.json that preview_only=True writes, with "auto": false on the clips to correct).
+    preview_only=True finds the clips and writes layout_preview/*.jpg + layout_overrides.json; renders nothing.
+    min_dur/target_dur/max_dur = clip length in seconds. None of these change the saved transcript.
     """
     from streamclipper.cli import build_parser  # late import: cli imports every command module
     from streamclipper.commands import clip_stream
@@ -226,6 +259,15 @@ def run_pipeline(
         "enhance_speech": enhance_speech or "off",
         "brand_kit": str(brand_kit or "").strip(),
         "hud": hud or "auto",
+        "cam_fit": cam_fit or "standard",
+        "game_anchor": game_anchor or "side",
+        "cam_track": cam_track or "off",
+        "streamer_profile": str(streamer_profile or "").strip(),
+        "layout_overrides": str(layout_overrides or "").strip(),
+        "preview_only": bool(preview_only),
+        "min_dur": float(min_dur),
+        "target_dur": float(target_dur),
+        "max_dur": float(max_dur),
     }
     if opts["brand_kit"] and not Path(opts["brand_kit"]).is_file():
         raise ToolError("The brand kit file was not found.", "check the brand_kit path, or leave it empty")
@@ -244,6 +286,8 @@ def run_pipeline(
     finally:
         set_ytdlp_cookies(None)
 
+    if preview_only:
+        return {"out_dir": out, "preview": summary.get("preview") or [], "overrides": out / "layout_overrides.json"}
     result = collect_outputs(out, summary, droot if drafts else None)
     failed = [name for name, ok in summary["gate"] if not ok]
     if failed:
@@ -372,3 +416,95 @@ def results_html(result: dict, previews: int = 3, max_preview_mb: float = 15.0) 
     if not cards:
         return "<p>No clip passed the quality bar. Try a lower min_score.</p>"
     return "<div>" + "".join(cards) + "</div>"
+
+
+def streamer_profile_path(name: str, folder: str = "StreamClipper/streamers") -> str:
+    """Drive path of a streamer's profile JSON (MyDrive/StreamClipper/streamers/<name>.json); '' for no name."""
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(name or "").strip()).strip("._")
+    if not safe:
+        return ""
+    d = drive_out_dir(folder)
+    d.mkdir(parents=True, exist_ok=True)
+    return str(d / f"{safe.lower()}.json")
+
+
+def _parse_px(text: str, what: str):
+    text = str(text or "").strip()
+    if not text:
+        return None
+    try:
+        vals = [int(round(float(v))) for v in text.replace(" ", "").split(",")]
+    except ValueError:
+        vals = []
+    if len(vals) != 4:
+        raise ToolError(f"The {what} box must be x,y,width,height in pixels, e.g. 0,0,480,300.", "fix the value")
+    return vals
+
+
+def correct_clip(
+    overrides: str, rank: int, cam: str = "", game: str = "", layout: str = "split", ratio: str = "9:16"
+) -> dict:
+    """
+    Set a manual crop for one clip of a layout_overrides.json written by the preview: cam/game as 'x,y,w,h' pixels
+    of the source frame (empty game = chosen automatically clear of the streamer; layout 'full' needs no cam).
+    Writes a new preview image of that clip and returns its entry. rank 0 or a missing clip raises ToolError.
+    """
+    from streamclipper import camfit
+    from streamclipper.state import write_json_atomic
+
+    data = camfit.load_overrides(overrides)
+    entry = next((c for c in data["clips"] if isinstance(c, dict) and c.get("rank") == int(rank)), None)
+    if entry is None:
+        ranks = ", ".join(str(c.get("rank")) for c in data["clips"] if isinstance(c, dict))
+        raise ToolError(f"Clip {rank} is not in the preview.", f"use one of: {ranks}")
+    vw, vh = int(entry["width"]), int(entry["height"])
+    cam_px, game_px = _parse_px(cam, "facecam"), _parse_px(game, "gameplay")
+    if layout == "split" and cam_px is None:
+        raise ToolError("A split layout needs the facecam box.", "fill in correct_cam, or choose layout full")
+    new = dict(entry, auto=False, layout=layout, cam=cam_px if layout == "split" else None, game=game_px, segments=None)
+    opts = {"ratio": ratio, "layout": layout, "game_anchor": "center"}
+    _o, cam_n, game_n, _note = camfit.apply_override(new, dict(opts), vw, vh)
+    if layout == "split" and game_n is None:
+        corner = ("top" if (cam_n[1] + cam_n[3]) / 2 < 0.5 else "bottom") + (
+            "_left" if (cam_n[0] + cam_n[2]) / 2 < 0.5 else "_right"
+        )
+        game_n = camfit.game_box_for(camfit.corner_face(cam_n, corner), corner, opts, vw, vh, cam_n)
+        if game_n is None:
+            raise ToolError("No gameplay area is left next to that facecam box.", "give correct_game too")
+    crops = camfit.render_crops(layout, ratio, cam_n, game_n, vw, vh)
+    new["cam"], new["game"] = crops["cam"], crops["game"]
+    img = Path(overrides).parent / "layout_preview" / f"rank{int(rank):02d}_manual.jpg"
+    t = (float(entry["start"]) + float(entry["end"])) / 2 - float(entry["window_start"])
+    camfit.preview_image(Path(entry["window"]), t, vw, vh, layout, new["cam"], new["game"], ratio, img)
+    new["images"], new["note"] = [fwd(img)], "manual crop (auto: false)"
+    data["clips"] = [new if c is entry else c for c in data["clips"]]
+    write_json_atomic(Path(overrides), data)
+    return new
+
+
+def preview_html(entries: list, max_width: int = 900) -> str:
+    """Preview cards for IPython.display.HTML: each clip's crops drawn on the frame and the mock vertical clip."""
+    parts = []
+    for e in entries:
+        head = f"<b>Clip {e.get('rank')}</b> ({_mmss_s(e.get('start'))}): {html.escape(str(e.get('note') or ''))}"
+        if e.get("cam"):
+            head += f"<br>facecam <code>{','.join(map(str, e['cam']))}</code>"
+        if e.get("game"):
+            head += f" &nbsp; gameplay <code>{','.join(map(str, e['game']))}</code>"
+        imgs = []
+        for p in e.get("images") or []:
+            try:
+                b64 = base64.b64encode(Path(p).read_bytes()).decode("ascii")
+            except OSError:
+                continue
+            imgs.append(f"<img src='data:image/jpeg;base64,{b64}' style='max-width:{max_width}px;width:100%'>")
+        parts.append(f"<div style='margin:12px 0'>{head}<br>{''.join(imgs)}</div>")
+    return "".join(parts) or "<p>No clips to preview.</p>"
+
+
+def _mmss_s(t) -> str:
+    try:
+        t = float(t)
+    except (TypeError, ValueError):
+        return "-"
+    return f"{int(t // 3600):d}:{int(t % 3600 // 60):02d}:{int(t % 60):02d}"

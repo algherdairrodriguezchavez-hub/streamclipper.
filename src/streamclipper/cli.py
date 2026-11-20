@@ -221,6 +221,27 @@ def _add_layout_flags(p):
     p.add_argument("--cam-crop", default=None, help="Webcam box in source pixels x,y,w,h (overrides auto detection)")
     p.add_argument("--game-crop", default=None, help="Gameplay box in source pixels x,y,w,h")
     p.add_argument("--filler-video", default=None, help="Filler video for the hook-grabber bottom panel")
+    p.add_argument(
+        "--cam-fit",
+        choices=["standard", "tight", "close"],
+        default=None,
+        help="How close the facecam panel frames the face: standard (head and shoulders, the 5.3 look), "
+        "tight (about 3 face widths) or close (about 2.3); never outside the detected cam overlay",
+    )
+    p.add_argument(
+        "--game-anchor",
+        choices=["side", "center"],
+        default=None,
+        help="Gameplay crop next to a corner cam: side (largest free area, the 5.3 default) or center "
+        "(as close to the middle of the screen as the streamer allows)",
+    )
+    p.add_argument(
+        "--cam-track",
+        choices=["off", "auto"],
+        default=None,
+        help="auto: check each clip in parts; when the cam moves, turns off or changes size inside a clip, "
+        "the clip is cut into parts with their own crops (default off)",
+    )
 
 
 def _add_publish_source(p, rank_default=1):
@@ -373,6 +394,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--hindi-script", choices=["devanagari", "roman"], default="devanagari", help="How Hindi captions are written"
     )
     _add_hud_flags(cs)
+    cs.add_argument(
+        "--streamer-profile",
+        default="",
+        help="JSON file of this streamer's cam positions (created if missing, updated after the run); used when "
+        "a clip's cam is not detected, and its saved cam-fit/game-anchor/cam-track are the defaults",
+    )
+    cs.add_argument(
+        "--layout-overrides",
+        default="",
+        help='JSON file of per-clip crops (written by --preview-only; set "auto": false on a clip to use its boxes)',
+    )
+    cs.add_argument(
+        "--preview-only",
+        action="store_true",
+        help="Find the clips and write layout preview images + layout_overrides.json for the first --max-clips "
+        "clips; render nothing",
+    )
     _add_layout_flags(cs)
     _add_effect_flags(cs)
     _add_draft_flags(cs)

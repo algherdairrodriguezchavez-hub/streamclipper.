@@ -5,7 +5,7 @@ import json
 import math
 from pathlib import Path
 
-from streamclipper import reframe
+from streamclipper import camfit, reframe
 from streamclipper.asr import filler_pass, read_wav16k, rescue_words
 from streamclipper.audio import (
     _mmss,
@@ -406,6 +406,11 @@ def clip_stream(args) -> dict:
             "pass --max-clips 0 for all."
         )
     boxes = {}  # filled once when --cam-crop is given; otherwise every clip detects its own layout
+    layout_ctx = _layout_context(args, opts)
+    if getattr(args, "preview_only", False):
+        entries = preview_layouts(res["clips"], n_make, src, args.url, res["duration"], work_dir, opts, layout_ctx)
+        camfit.save_profile(layout_ctx["profile"], _profile_settings(opts))
+        return {"out_json": out_json, "doc": doc, "plans": [], "gate": [], "preview": entries}
     hook_override = (args.hook_text or "").replace("\\n", "\n")
     asr = None
     if res.get("transcribed") and res.get("asr") in ("full", "regions"):
@@ -453,6 +458,7 @@ def clip_stream(args) -> dict:
                 no_draft=args.no_draft,
                 portable=getattr(args, "portable_drafts", False),
                 asr=asr,
+                layout_ctx=layout_ctx,
             )
         except SkipClip as e:
             print(f"Clip rank {clip['rank']} ({_mmss(clip['start'])}-{_mmss(clip['end'])}) skipped: {e}")
@@ -463,6 +469,7 @@ def clip_stream(args) -> dict:
             results.append((plan["name"], render_and_gate(plan, mp4)))
             _link_outputs(doc["clips"][idx], mp4, work_dir)
         res["state"].mark_rendered(clip["rank"], plan["name"], key=make_key)
+    camfit.save_profile(layout_ctx["profile"], _profile_settings(opts))
     if results:
         save_clips(out_json, doc)
     return {"out_json": out_json, "doc": doc, "plans": plans, "gate": results}
@@ -470,8 +477,10 @@ def clip_stream(args) -> dict:
 
 def _make_key(opts: dict, args, hook_override: str, numbered: bool) -> str:
     """Fingerprint of everything that shapes a made clip, so a resume reuses a clip only when nothing changed."""
+    # the 5.4 crop options at their defaults leave the key as before, so older finished clips are kept
+    new_defaults = {"cam_fit": "standard", "game_anchor": "side", "cam_track": "off"}
     keep = {
-        "opts": opts,
+        "opts": {k: v for k, v in opts.items() if not (k in new_defaults and v == new_defaults[k])},
         "prefix": args.prefix,
         "numbered": numbered,
         "hook": hook_override,
@@ -479,6 +488,8 @@ def _make_key(opts: dict, args, hook_override: str, numbered: bool) -> str:
         "draft": not args.no_draft,
         "draft_root": str(args.draft_root or ""),
     }
+    if getattr(args, "layout_overrides", ""):
+        keep["layout_overrides"] = camfit.overrides_key(args.layout_overrides)
     return hashlib.sha1(json.dumps(keep, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:16]
 
 
@@ -510,6 +521,179 @@ def cmd_clip_stream(args):
     _gate_summary(clip_stream(args)["gate"])
 
 
+def _clip_window(clip: dict, src: Path, url: str, total_dur: float, work_dir: Path) -> tuple:
+    """(ws, we, window file, its probe) of a clip: [start-1, end+1] downloaded (url) or cut from the source once."""
+    # the window starts on the 1/30 s grid, so cut points snapped in source time stay where they are
+    ws = max(0.0, math.floor((clip["start"] - 1.0) * DRAFT_FPS) / DRAFT_FPS)
+    we = min(total_dur, clip["end"] + 1.0)
+    if url:
+        url_key = hashlib.sha1(url.encode("utf-8")).hexdigest()[:10]
+        win_file = work_dir / "windows" / f"{url_key}_{int(ws * 1000)}_{int(we * 1000)}.mp4"
+        if not win_file.is_file():
+            download_slice(url, ws, we, win_file)
+    else:
+        win_file = extract_window(src, ws, we, work_dir / "windows")
+    return ws, we, win_file, probe_video(win_file)
+
+
+def _layout_context(args, opts: dict) -> dict:
+    """Streamer profile and per-clip layout overrides of a clip-stream run. A profile's saved cam_fit,
+    game_anchor and cam_track become the defaults when the flag was not given (opts is updated in place)."""
+    from streamclipper.options import OPT_CHOICES
+
+    profile = camfit.load_profile(getattr(args, "streamer_profile", "") or "")
+    if profile:
+        for k in ("cam_fit", "game_anchor", "cam_track"):
+            saved = (profile.get("settings") or {}).get(k)
+            if getattr(args, k, None) in (None, "") and saved in OPT_CHOICES[k]:
+                opts[k] = saved
+        print(f"Streamer profile: {profile['name']} ({len(profile['cams'])} known cam position(s))")
+    overrides = camfit.load_overrides(getattr(args, "layout_overrides", "") or "")
+    manual = sum(1 for o in overrides["clips"] if isinstance(o, dict) and not o.get("auto", True))
+    if manual:
+        print(f"Layout overrides: {manual} clip(s) with a manual crop")
+    return {"profile": profile, "overrides": overrides}
+
+
+def _profile_settings(opts: dict) -> dict:
+    return {k: opts.get(k) for k in ("cam_fit", "game_anchor", "cam_track") if opts.get(k)}
+
+
+def _corner_of(box: list) -> str:
+    cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+    return ("top" if cy < 0.5 else "bottom") + ("_left" if cx < 0.5 else "_right")
+
+
+def decide_clip_layout(
+    clip: dict, win_file: Path, wmeta: dict, ws: float, opts: dict, boxes: dict, layout_ctx: dict = None
+) -> tuple:
+    """
+    (opts for this clip, cam_box, game_box, note, reframe segments or None) for one clip window, in this order:
+    a manual entry of the layout overrides; --cam-crop (one box for every clip); the face-based detection of
+    this clip (options.clip_layout, with --cam-fit / --game-anchor); with --cam-track auto, a cam that moves
+    inside the clip gives segments; when no cam is found, a known cam position of the streamer profile that
+    shows a face in this clip. Detected and manual cam positions are added to the profile.
+    """
+    ctx = layout_ctx or {}
+    profile = ctx.get("profile")
+    vw, vh = wmeta["width"], wmeta["height"]
+    s, e = clip["start"] - ws, min(wmeta["dur"], clip["end"] - ws)
+    ov = camfit.find_override(ctx.get("overrides"), clip)
+    if ov is not None and opts["layout"] in ("split", "full"):
+        if ov.get("segments"):
+            rctx = {"width": vw, "height": vh, "ratio": opts["ratio"]}
+            rsegs = reframe.validate_segments(ov["segments"], rctx, 0.0, round(wmeta["dur"], 3))
+            return opts, None, None, f"layout: {len(rsegs)} part(s) from the layout overrides", rsegs
+        o2, cam, game, note = camfit.apply_override(ov, opts, vw, vh)
+        if cam is not None:
+            corner = _corner_of(cam)
+            if game is None:
+                game = camfit.game_box_for(camfit.corner_face(cam, corner), corner, o2, vw, vh, cam)
+            camfit.learn(profile, corner, cam, manual=True)
+        return o2, cam, game, note, None
+    if opts.get("cam_crop"):
+        if "cam" not in boxes:
+            boxes["cam"], boxes["game"] = clip_boxes(win_file, wmeta, opts)
+        return opts, boxes["cam"], boxes["game"], f"layout: {opts['layout']} (--cam-crop)", None
+    info = {}
+    o2, cam, game, note = clip_layout(win_file, wmeta, opts, s, e, info=info)
+    if opts["layout"] != "split":
+        return o2, cam, game, note, None
+    if opts.get("cam_track") == "auto" and info.get("kind") in ("corner-cam", "no-cam", "full-cam"):
+        runs = camfit.track_cam(win_file, s, e, vw, vh, opts)
+        if runs:
+            rsegs = camfit.runs_to_segments(runs, round(wmeta["dur"], 3), opts["ratio"], vw, vh)
+            if len(rsegs) > 1:
+                rctx = {"width": vw, "height": vh, "ratio": opts["ratio"]}
+                rsegs = reframe.validate_segments(rsegs, rctx, 0.0, round(wmeta["dur"], 3))
+                for r in runs:
+                    if r["cam"] is not None:
+                        camfit.learn(profile, r["corner"], r["cam"])
+                what = ", ".join(f"{x['start'] + ws:.1f}s {x['layout']}" for x in rsegs)
+                return o2, None, None, f"layout: the cam changes inside the clip -> {len(rsegs)} parts ({what})", rsegs
+    if o2["layout"] == "split" and cam is not None:
+        if info.get("kind") == "corner-cam":
+            camfit.learn(profile, info.get("corner"), cam)
+        return o2, cam, game, note, None
+    if profile and profile["cams"] and info.get("kind") in ("no-cam", None) and info.get("kind") != "blank":
+        hit = camfit.profile_cam(profile, win_file, s, e, vw, vh)
+        if hit:
+            pgame = camfit.game_box_for(
+                camfit.corner_face(hit["cam"], hit["corner"]), hit["corner"], opts, vw, vh, hit["cam"]
+            )
+            if pgame is not None:
+                camfit.learn(profile, hit["corner"], hit["cam"])
+                return dict(opts), hit["cam"], pgame, "layout: split (cam position from the streamer profile)", None
+    return o2, cam, game, note, None
+
+
+def preview_layouts(
+    clips: list, n_make: int, src: Path, url: str, total_dur: float, work_dir: Path, opts: dict, layout_ctx: dict
+) -> list:
+    """
+    --preview-only: for the first n_make clips (all when 0) decide the layout exactly as the render would and
+    write layout_preview/<rank>_*.jpg (crops drawn on the frame + a mock of the vertical clip) and
+    layout_overrides.json (one entry per clip, "auto": true). Entries already set to "auto": false are kept.
+    """
+    out_dir = work_dir / "layout_preview"
+    ov_path = work_dir / "layout_overrides.json"
+    old = camfit.load_overrides(ov_path) if ov_path.is_file() else {"clips": []}
+    entries, boxes = [], {}
+    for clip in clips[: n_make or len(clips)]:
+        ws, _we, win_file, wmeta = _clip_window(clip, src, url, total_dur, work_dir)
+        vw, vh = wmeta["width"], wmeta["height"]
+        entry = {
+            "rank": clip["rank"],
+            "start": round(clip["start"], 2),
+            "end": round(clip["end"], 2),
+            "window_start": round(ws, 3),
+            "window": fwd(win_file),
+            "width": vw,
+            "height": vh,
+            "auto": True,
+        }
+        try:
+            o2, cam, game, note, rsegs = decide_clip_layout(clip, win_file, wmeta, ws, opts, boxes, layout_ctx)
+        except SkipClip as e:
+            entry.update(layout=None, note=f"skipped: {e}", images=[])
+            entries.append(entry)
+            print(f"Preview rank {clip['rank']}: skipped ({e})")
+            continue
+        images = []
+        if rsegs:
+            entry.update(layout="segments", cam=None, game=None, segments=rsegs)
+            for k, sg in enumerate(rsegs, 1):
+                img = out_dir / f"rank{clip['rank']:02d}_part{k}.jpg"
+                t = (sg["start"] + sg["end"]) / 2
+                w = sg["windows"]
+                camfit.preview_image(win_file, t, vw, vh, sg["layout"], w.get("cam"), w.get("game"), opts["ratio"], img)
+                images.append(fwd(img))
+        else:
+            crops = camfit.render_crops(o2["layout"], opts["ratio"], cam, game, vw, vh)
+            entry.update(layout=crops["layout"], cam=crops["cam"], game=crops["game"], segments=None)
+            img = out_dir / f"rank{clip['rank']:02d}.jpg"
+            t = min(max(0.0, clip.get("peak", clip["start"]) - ws), wmeta["dur"] - 0.1)
+            camfit.preview_image(win_file, t, vw, vh, crops["layout"], crops["cam"], crops["game"], opts["ratio"], img)
+            images.append(fwd(img))
+        entry.update(note=note, images=images)
+        kept = camfit.find_override(old, clip)
+        if kept is not None:
+            entry = dict(kept, images=images, note="manual crop kept (auto: false)")
+        entries.append(entry)
+        print(f"Preview rank {clip['rank']}: {entry['note']} -> {images[0] if images else '-'}")
+    write_json_atomic(
+        ov_path,
+        {
+            "help": 'Set "auto": false on a clip to render it with these boxes ([x, y, width, height] in pixels '
+            "of the source frame); layout split needs cam and game, full needs game. Then run with "
+            "--layout-overrides this file.",
+            "clips": entries,
+        },
+    )
+    print(f"Layout preview: {len(entries)} clip(s) -> {fwd(out_dir)}; edit {fwd(ov_path)} to correct a crop")
+    return entries
+
+
 def make_stream_clip(
     clip: dict,
     idx: int,
@@ -528,6 +712,7 @@ def make_stream_clip(
     no_draft: bool = True,
     portable: bool = False,
     asr: dict = None,
+    layout_ctx: dict = None,
 ) -> dict:
     """
     One discovered clip -> window file -> layout panels -> timeline (hook mode) -> CapCut draft
@@ -540,27 +725,9 @@ def make_stream_clip(
         if name != proj_name:
             print(f"'{proj_name}' already exists; writing '{name}' instead (pass --overwrite to replace it).")
             proj_name = name
-    # the window starts on the 1/30 s grid, so cut points snapped in source time stay where they are
-    ws = max(0.0, math.floor((clip["start"] - 1.0) * DRAFT_FPS) / DRAFT_FPS)
-    we = min(total_dur, clip["end"] + 1.0)
-    if url:
-        url_key = hashlib.sha1(url.encode("utf-8")).hexdigest()[:10]
-        win_file = work_dir / "windows" / f"{url_key}_{int(ws * 1000)}_{int(we * 1000)}.mp4"
-        if not win_file.is_file():
-            download_slice(url, ws, we, win_file)
-    else:
-        win_file = extract_window(src, ws, we, work_dir / "windows")
-    wmeta = probe_video(win_file)
-    if opts.get("cam_crop"):
-        if "cam" not in boxes:
-            boxes["cam"], boxes["game"] = clip_boxes(win_file, wmeta, opts)
-        cam_box, game_box = boxes["cam"], boxes["game"]
-        print(f"Clip {idx + 1} layout: {opts['layout']} (--cam-crop)")
-    else:
-        opts, cam_box, game_box, note = clip_layout(
-            win_file, wmeta, opts, clip["start"] - ws, min(wmeta["dur"], clip["end"] - ws)
-        )
-        print(f"Clip {idx + 1} {note}")
+    ws, we, win_file, wmeta = _clip_window(clip, src, url, total_dur, work_dir)
+    opts, cam_box, game_box, note, rsegs = decide_clip_layout(clip, win_file, wmeta, ws, opts, boxes, layout_ctx)
+    print(f"Clip {idx + 1} {note}")
     # --caption-style auto (default): the style comes from this clip's category
     style = clip_style(opts.get("caption_style"), clip.get("category"), opts.get("content") or "gaming")
     if style != opts.get("caption_style"):
@@ -571,7 +738,13 @@ def make_stream_clip(
         words = _rescue_clip_words(words, win_file, ws, wmeta["dur"], asr, work_dir / "analysis", idx)
     if opts.get("layout") == "speaker" and words:  # the active speaker switches only while someone talks
         opts = dict(opts, speech_spans=speech_spans(words, ws))
-    panels = render_layout_panels(win_file, wmeta, opts, cam_box, game_box, None, None, work_dir / "panels")
+    if rsegs:  # the cam moves inside the clip: one composite panel with a crop per part
+        anchor = reframe.auto_anchor(rsegs[0]["layout"], opts["ratio"])
+        panels = render_reframe_panel(
+            win_file, work_dir / "panels", wmeta, rsegs, 0.0, wmeta["dur"], opts["ratio"], anchor
+        )
+    else:
+        panels = render_layout_panels(win_file, wmeta, opts, cam_box, game_box, None, None, work_dir / "panels")
     if panels.get("speaker_note"):
         print(f"Clip {idx + 1} {panels['speaker_note']}")
     if panels.get("caption_note"):
@@ -642,6 +815,8 @@ def make_stream_clip(
     spec_out.write_text(json.dumps(spec, indent=2, ensure_ascii=False), encoding="utf-8")
     if not no_draft:
         plan["draft"] = build_from_spec_dict(spec).name
+    if rsegs:
+        plan["reframe_segments_window"] = rsegs  # window time; the composite panel above already holds them
     plan_out = work_dir / f"{proj_name}.clip.json"
     plan_out.write_text(json.dumps(plan, indent=2, ensure_ascii=False), encoding="utf-8")
     print(
@@ -789,6 +964,7 @@ def cmd_render(args):
     work_dir = Path(args.out).resolve() if args.out else (cp.parent / "render")
     work_dir.mkdir(parents=True, exist_ok=True)
     boxes = {}  # filled once when --cam-crop is given; otherwise every clip detects its own layout
+    layout_ctx = _layout_context(args, opts)
     hook_override = (args.hook_text or "").replace("\\n", "\n")
     state = RunState.open_existing(cp.parent / f"{cp.stem}_work" / "state.json")
     results = []
@@ -808,6 +984,7 @@ def cmd_render(args):
                 hook_override,
                 overwrite=args.overwrite,
                 no_draft=True,
+                layout_ctx=layout_ctx,
             )
         except SkipClip as e:
             print(f"Clip rank {clip.get('rank', i + 1)} skipped: {e}")

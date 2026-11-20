@@ -284,6 +284,19 @@ The `vision` extra uses MediaPipe's BlazeFace full-range face detector (bundled,
 - **Active speaker:** with 2 or more faces, the crop goes to the face whose mouth moves while someone speaks. It switches only after the new speaker has led for 1 s, and never during silence.
 - **Measured** on 3 public videos (60-72 labelled frames each): face found on the frame, Haar -> MediaPipe: corner facecam 0% -> 78%, full-screen cam 58% -> 98%, podcast 75% -> 100%. Crop jitter (px per frame at 1080 wide): full cam 1.32 -> 0.20, podcast 2.56 -> 1.28.
 
+## Facecam and gameplay crops per clip
+
+Every clip finds its own facecam (8 frames of the clip window, see Face tracking), so streamers with the cam in another corner, or a cam that moves between clips, need no coordinates. `--cam-crop` turns that off and uses one box for every clip; use it only for a fixed overlay. Options (`clip-stream`, `render`, `build`; also in the Colab cell 6):
+
+- `--cam-fit standard|tight|close` [standard]: how close the facecam panel frames the face. `standard` keeps head and shoulders (the face is at most about 45% of the panel width); `tight` crops to about 3 face widths and `close` to about 2.3, always inside the detected cam overlay, and never so tight that the face touches the panel edge (the gate would fail it).
+- `--game-anchor side|center` [side]: the gameplay crop next to a corner cam. `side` takes the largest area clear of the streamer, which can sit far to one side; `center` keeps it as close to the middle of the screen as the streamer and the cam overlay allow.
+- `--cam-track off|auto` [off]: with `auto` each clip is checked in 2-4 parts. When the cam moves, changes size or turns off inside a clip, the clip is cut where it happens (found to about half a second) and each part gets its own crops, or a centre crop where there is no cam. The parts are rendered as one composite panel (the reframe renderer); the CapCut draft then has the composite as its main track.
+- `--streamer-profile FILE` (clip-stream): a JSON file per streamer, created if missing. Every detected or corrected cam position is added to it, and the saved `cam_fit`, `game_anchor` and `cam_track` are the defaults for that streamer. When a clip's cam is not detected (a cut-out cam, the streamer looks away), the known positions are tried; one is used only when a face is found inside it in that clip.
+- `--preview-only` (clip-stream): finds the clips (a saved transcript is reused) and writes, for the first `--max-clips` clips, `layout_preview/rank<NN>.jpg` (the frame with a pixel grid, the facecam crop in red and the gameplay crop in cyan, next to a mock of the vertical clip) and `layout_overrides.json`. Nothing is rendered.
+- `--layout-overrides FILE` (clip-stream): per-clip crops. In `layout_overrides.json` set `"auto": false` on a clip and give `cam` and `game` as `[x, y, width, height]` in pixels of the source frame (`layout` `split`, or `full` with only `game`). Clips are matched on their start time, so they still match when the ranking changes; every other clip keeps its automatic crop. In Colab, cell 6b does this from a form (`correct_clip`, `correct_cam`, `correct_game`).
+
+None of these options change the saved transcript or analysis: a re-run with them resumes from `state.json`.
+
 ## Caption coverage check
 
 The export gate has a `caption_coverage` row: the share of spoken words that are on screen while they are said, and the longest stretch of speech with no caption. It fails below 97% or above 0.6 s. Words in the tease (the opening flash shows only the hook) do not count. Fixed in 5.3.0 after checking real clips: very short words were dropped or joined badly, and shouted words were missing because Whisper's voice filter skipped them (each clip window now gets one extra pass without that filter). On 14 earlier clips, 10 failed the check before the fixes and none after.
@@ -393,6 +406,8 @@ Every command has `--help` with the full list of flags.
 | `--close-capcut` | clip-stream, build, render, import-draft | force-close CapCut (unsaved CapCut edits are lost) |
 | `--zip FILE` | import-draft | the drafts zip |
 | `--hud auto\|off\|gta5\|gta6\|generic`, `--hud-profile FILE` | discover-clips, clip-stream | game screen events [auto] |
+| `--cam-fit standard\|tight\|close`, `--game-anchor side\|center`, `--cam-track off\|auto` | clip-stream, render, build | facecam framing, gameplay crop position, a cam that moves inside a clip [standard, side, off] |
+| `--streamer-profile FILE`, `--layout-overrides FILE`, `--preview-only` | clip-stream | saved cam positions per streamer, per-clip crops, crop preview without rendering |
 | `--zoom off\|light\|medium\|strong` | clip-stream, render, build | punch-in zoom on the payoff [off] |
 | `--remove-fillers` | clip-stream, build | cut filler words [off] |
 | `--enhance-speech off\|light\|strong` | clip-stream, render, build | speech noise reduction [off] |

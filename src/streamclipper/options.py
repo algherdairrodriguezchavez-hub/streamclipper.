@@ -37,6 +37,9 @@ OPT_CHOICES = {
     "highlight_color": ("",) + HIGHLIGHT_COLOURS,
     "caption_font": ("",) + CAPTION_FONTS,
     "hook_style": tuple(HOOK_STYLES),
+    "cam_fit": ("standard", "tight", "close"),
+    "game_anchor": ("side", "center"),
+    "cam_track": ("off", "auto"),
 }
 
 # Caption options: CLI flag > spec > preset > default ('' / None = the caption style's own choice).
@@ -66,6 +69,9 @@ DEFAULT_OPTS = {
     "cam_crop": None,
     "game_crop": None,
     "hindi_script": "devanagari",
+    "cam_fit": "standard",
+    "game_anchor": "side",
+    "cam_track": "off",
 }
 
 
@@ -100,7 +106,18 @@ def resolve_options(args, spec: dict = None) -> dict:
         for k in DEFAULT_OPTS:
             if src.get(k) not in (None, ""):
                 opts[k] = src[k]
-    for k in ("ratio", "hook_mode", "caption_mode", "font", "cam_crop", "game_crop", "hindi_script"):
+    for k in (
+        "ratio",
+        "hook_mode",
+        "caption_mode",
+        "font",
+        "cam_crop",
+        "game_crop",
+        "hindi_script",
+        "cam_fit",
+        "game_anchor",
+        "cam_track",
+    ):
         v = getattr(args, k, None)
         if v not in (None, ""):
             opts[k] = v
@@ -205,7 +222,7 @@ def clip_boxes(src: Path, meta: dict, opts: dict, stream_layout: dict = None) ->
 CAM_LAYOUTS = ("split", "uncut-stack")
 
 
-def clip_layout(src: Path, meta: dict, opts: dict, start: float = None, end: float = None) -> tuple:
+def clip_layout(src: Path, meta: dict, opts: dict, start: float = None, end: float = None, info: dict = None) -> tuple:
     """
     Layout for one clip window from the faces in it: (opts for this clip, cam_box, game_box, note).
       corner-cam -> the chosen layout with the detected webcam box;
@@ -213,7 +230,9 @@ def clip_layout(src: Path, meta: dict, opts: dict, start: float = None, end: flo
       no-cam     -> 'full' centre crop of the gameplay.
     A split is never made without a face in its cam panel: a preset's split falls back to 'full' too.
     --cam-crop, portrait sources and the hook-grabber layout skip detection. Without OpenCV the old
-    skin-colour corner heuristic is used.
+    skin-colour corner heuristic is used. opts cam_fit (standard|tight|close) frames the face closer
+    (camfit.fit_cam_box); opts game_anchor (side|center) places the gameplay crop. info (a dict) receives
+    the detection result (kind, corner, face_box, cam_box) for the caller.
     """
     vw, vh = meta["width"], meta["height"]
     layout = opts["layout"]
@@ -225,6 +244,8 @@ def clip_layout(src: Path, meta: dict, opts: dict, start: float = None, end: flo
     s = 0.0 if start is None else start
     e = meta["dur"] if end is None else end
     res = classify_layout(src, s, e, vw, vh)
+    if info is not None and res is not None:
+        info.update(res)
     if res is None:
         cam, game = clip_boxes(src, meta, opts)
         return opts, cam, game, f"layout: {layout} (skin heuristic; pip install -e .[vision] for face detection)"
@@ -237,12 +258,20 @@ def clip_layout(src: Path, meta: dict, opts: dict, start: float = None, end: flo
         )
     if kind == "corner-cam":
         cam = res["cam_box"] if layout in CAM_LAYOUTS + ("square-frame",) else None
+        if cam is not None and layout in CAM_LAYOUTS and (opts.get("cam_fit") or "standard") != "standard":
+            from streamclipper.camfit import fit_cam_box
+
+            cam = fit_cam_box(res["face_box"], cam, opts["cam_fit"], opts["ratio"], vw, vh)
         if layout in CAM_LAYOUTS and game is None:
             # the gameplay panel must not show any part of the streamer (a keyed streamer has no cam
             # border: arms and hands reach far past the face), so crop around the whole person
             person = person_box(res["face_box"], res["corner"])
+            if opts.get("game_anchor") == "center" and res.get("cam_box"):
+                # a centred crop must also stay clear of the cam overlay's frame, not only of the streamer
+                c = res["cam_box"]
+                person = [min(person[0], c[0]), min(person[1], c[1]), max(person[2], c[2]), max(person[3], c[3])]
             aspect = 1080 / 1248 if opts["ratio"] == "9:16" else 1080 / 626
-            game = gameplay_box_avoiding(person, vw, vh, aspect)
+            game = gameplay_box_avoiding(person, vw, vh, aspect, anchor=opts.get("game_anchor") or "side")
             opts = dict(opts, person_box=person)
             black = black_spans(src, game, vw, vh, s, e) if game else []
             if black:
