@@ -1,5 +1,6 @@
 """
-Build notebooks/StreamClipper_Colab.ipynb with nbformat, so the notebook is always valid JSON.
+Build notebooks/StreamClipper_Colab.ipynb and notebooks/StreamClipper_Automatico.ipynb with nbformat,
+so the notebooks are always valid JSON.
 
     python tools/make_notebook.py
 
@@ -439,12 +440,202 @@ def build() -> nbformat.NotebookNode:
     return nb
 
 
+# ---------------------------------------------------------------------------------------------------------------
+# Automatic mode (Spanish): one link -> one project folder, three cells. Same pipeline as the notebook above.
+AUTO_OUT = ROOT / "notebooks" / "StreamClipper_Automatico.ipynb"
+AUTO_REPO = "https://github.com/algherdairrodriguezchavez-hub/streamclipper.@claude/project-thread-ryl0jx"
+
+AUTO_INTRO = """# StreamClipper automático: pega un enlace, recibe los clips
+
+1. **Entorno de ejecución > Cambiar tipo de entorno de ejecución > T4 GPU**.
+2. Ejecuta la **celda 1** una vez por sesión (instala StreamClipper y conecta tu Google Drive).
+3. Pega el enlace en la **celda 2** y pulsa ▶. Para otro enlace, cambia el enlace y pulsa ▶ otra vez.
+4. La **celda 3** muestra la lista de todo lo procesado.
+
+Cada enlace tiene su propia carpeta en `MyDrive/StreamClipper/proyectos/`: un enlace nuevo nunca usa ni
+sobrescribe los clips de otro. Si Colab se desconecta, ejecuta la celda 1 y luego la 2 con el mismo enlace:
+continúa donde se quedó, sin volver a transcribir.
+
+YouTube suele pedir "confirma que no eres un bot" en Colab: guarda tu `cookies.txt` (de una cuenta secundaria) en
+`MyDrive/privado/cookies.txt` y se usa automáticamente. Ese archivo da acceso a la cuenta: no lo compartas nunca.
+
+Procesa solo directos con permiso del streamer (o de un programa oficial de clipping).
+"""
+
+AUTO_SETUP = """#@title 1. Preparar (una vez por sesión)
+github_repo = "{AUTO_REPO}"  #@param {type:"string"}
+
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+if shutil.which("nvidia-smi"):
+    out = subprocess.run(
+        ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], capture_output=True, text=True
+    )
+    print("GPU:", out.stdout.strip())
+    HAS_GPU = True
+else:
+    print("Sin GPU: funcionará, pero mucho más lento. Entorno de ejecución > Cambiar tipo > T4 GPU.")
+    HAS_GPU = False
+
+if shutil.which("ffmpeg") is None:
+    subprocess.run(["apt-get", "-qq", "update"], check=True)
+    subprocess.run(["apt-get", "-qq", "install", "-y", "ffmpeg"], check=True)
+
+EXTRAS = "asr,gpu,vision" if HAS_GPU else "asr,vision"
+LOCAL_SRC = os.environ.get("STREAMCLIPPER_LOCAL_SRC", "")  # tests only: install from a local checkout
+if LOCAL_SRC:
+    project = Path("/tmp/streamclipper_src")
+    shutil.rmtree(project, ignore_errors=True)
+    shutil.copytree(LOCAL_SRC, project, ignore=shutil.ignore_patterns(".agents", ".git", "__pycache__"))
+    target = f"{project}[{EXTRAS}]"
+else:
+    target = f"streamclipper[{EXTRAS}] @ git+{github_repo}"
+if globals().get("SC_INSTALLED") != target:
+    print("Instalando StreamClipper (3 a 6 minutos) ...")
+    pip = subprocess.run([sys.executable, "-m", "pip", "install", "-q", target], capture_output=True, text=True)
+    if pip.returncode != 0:  # a notebook does not show the output of a child process: print it
+        print(pip.stdout[-4000:], pip.stderr[-4000:])
+        raise RuntimeError("La instalación falló: mira las líneas de arriba")
+    SC_INSTALLED = target
+else:
+    print("StreamClipper ya está instalado en esta sesión.")
+
+if os.environ.get("STREAMCLIPPER_NO_DRIVE"):
+    os.environ.setdefault("STREAMCLIPPER_OUT", "/content")
+else:
+    from google.colab import drive
+
+    drive.mount("/content/drive")
+
+from streamclipper.autorun import base_dir, find_cookies
+
+print("Tus proyectos se guardan en:", base_dir() / "proyectos")
+COOKIES = find_cookies()
+print("Cookies de YouTube:", COOKIES or "no encontradas (si YouTube pide verificar que no eres un bot, "
+      "guarda tu cookies.txt en MyDrive/privado/cookies.txt)")
+print("Listo. Ahora pega tu enlace en la celda 2.")
+"""
+
+AUTO_PROCESS = """#@title 2. Procesar un enlace (pega el enlace y pulsa ▶)
+enlace = ""  #@param {type:"string"}
+#@markdown Si este enlace ya se procesó: `continuar` sigue en su carpeta (reutiliza la transcripción y los clips),
+#@markdown `nueva_version` crea otra carpeta (_v2) reutilizando la transcripción, `desde_cero` lo repite todo.
+si_ya_existe = "continuar"  #@param ["continuar", "nueva_version", "desde_cero"]
+#@markdown **Clips**
+max_clips = 3  #@param {type:"integer"}
+min_score = 40  #@param {type:"slider", min:0, max:100, step:5}
+min_dur = 38  #@param {type:"integer"}
+target_dur = 42  #@param {type:"integer"}
+max_dur = 48  #@param {type:"integer"}
+#@markdown **Estilo**
+caption_style = "auto"  #@param {STYLES}
+hook_style = "top-bar"  #@param {HOOKS}
+#@markdown **Cámara y gameplay** (se eligen en cada clip). `streamer` vacío = se usa el nombre del canal.
+cam_fit = "tight"  #@param ["standard", "tight", "close"]
+game_anchor = "center"  #@param ["side", "center"]
+cam_track = True  #@param {type:"boolean"}
+streamer = ""  #@param {type:"string"}
+#@markdown Ruta de `cookies.txt` en Drive. Vacío = se busca sola en `MyDrive/privado/cookies.txt`.
+cookies_path = ""  #@param {type:"string"}
+
+import os
+
+from IPython.display import HTML, display
+
+if "SC_INSTALLED" not in globals():
+    print("Primero ejecuta la celda 1 (Preparar) y después esta celda otra vez.")
+elif not (os.environ.get("STREAMCLIPPER_TEST_INPUT") or enlace.strip()):
+    print("Pega un enlace en el campo 'enlace' y pulsa ▶ otra vez.")
+else:
+    from streamclipper.autorun import process_link
+    from streamclipper.colab import results_html
+    from streamclipper.util import ToolError
+
+    result = None
+    try:
+        result = process_link(
+            os.environ.get("STREAMCLIPPER_TEST_INPUT") or enlace,  # tests only: a local video instead of the link
+            existing=si_ya_existe,
+            cookies=cookies_path.strip(),
+            streamer=streamer.strip(),
+            preset="streamer-split-9x16",
+            caption_style=caption_style,
+            hook_style=hook_style,
+            min_score=min_score,
+            max_clips=max_clips,
+            ratio="9:16",
+            llm="none",
+            drafts=False,
+            hud="auto",
+            cam_fit=cam_fit,
+            game_anchor=game_anchor,
+            cam_track="auto" if cam_track else "off",
+            min_dur=min_dur,
+            target_dur=target_dur,
+            max_dur=max_dur,
+        )
+    except ToolError as e:
+        print("ERROR:", e)
+        if e.hint:
+            print("Solución:", e.hint)
+        if "not a bot" in str(e).lower():
+            print("YouTube pide verificar que no eres un bot: guarda tu cookies.txt en MyDrive/privado/cookies.txt "
+                  "(o escribe su ruta en cookies_path) y pulsa ▶ otra vez. Se continúa donde se quedó.")
+    if result:
+        print("Carpeta de este enlace:", result["project"]["dir"])
+        display(HTML(results_html(result, previews=3)))
+"""
+
+AUTO_HISTORY = """#@title 3. Historial de enlaces procesados
+from IPython.display import HTML, display
+
+if "SC_INSTALLED" not in globals():
+    print("Primero ejecuta la celda 1 (Preparar).")
+else:
+    from streamclipper.autorun import base_dir, history_html
+
+    display(HTML(history_html()))
+    print("También en Drive:", base_dir() / "historial.csv")
+"""
+
+
+def build_auto() -> nbformat.NotebookNode:
+    nb = new_notebook()
+    nb.metadata["accelerator"] = "GPU"
+    nb.metadata["colab"] = {"provenance": [], "gpuType": "T4"}
+    nb.metadata["kernelspec"] = {"name": "python3", "display_name": "Python 3"}
+    nb.metadata["language_info"] = {"name": "python"}
+    nb.cells = [new_markdown_cell(AUTO_INTRO)]
+    choices = {
+        "{AUTO_REPO}": AUTO_REPO,
+        "{STYLES}": json.dumps([AUTO_STYLE] + list(STYLES)),
+        "{HOOKS}": json.dumps(list(HOOK_STYLES)),
+    }
+    for src in (AUTO_SETUP, AUTO_PROCESS, AUTO_HISTORY):
+        for key, val in choices.items():
+            src = src.replace(key, val)
+        cell = new_code_cell(src.rstrip("\n"))
+        cell.metadata["cellView"] = "form"
+        nb.cells.append(cell)
+    for i, cell in enumerate(nb.cells):
+        cell["id"] = f"auto-{i:02d}"
+    return nb
+
+
 def main():
     nb = build()
     nbformat.validate(nb)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     nbformat.write(nb, str(OUT))
     print(f"Wrote {OUT}")
+    auto = build_auto()
+    nbformat.validate(auto)
+    nbformat.write(auto, str(AUTO_OUT))
+    print(f"Wrote {AUTO_OUT}")
 
 
 if __name__ == "__main__":

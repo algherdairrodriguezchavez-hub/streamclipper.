@@ -58,6 +58,17 @@ streamclipper import-draft --zip capcut_drafts.zip
 
 The notebook uses only form fields and inline HTML (no web UI, no tunnels), so it works on the free tier. Cell 8 shows result cards: thumbnail, player, score, and title/description/hashtags with Copy buttons. If YouTube answers "Sign in to confirm you're not a bot" (common on Colab), upload the VOD to Drive and use its path, or set a `cookies.txt` path in cell 5. A cookies file gives access to your account: never share it.
 
+## Quickstart: Google Colab, automatic mode (one link, one folder)
+
+`notebooks/StreamClipper_Automatico.ipynb` (Spanish) has three cells: 1 installs StreamClipper and connects Drive (once per session), 2 processes a link, 3 lists everything processed. Paste a link into cell 2 and press ▶; for another link, change it and press ▶ again.
+
+- Every link gets its own folder: `MyDrive/StreamClipper/proyectos/<date>_<channel>_<video id>/` (MP4s, thumbnails, `index.html`, `clips.csv` and `analysis/` with the transcript and the progress). A new link never reuses or overwrites another link's results.
+- `MyDrive/StreamClipper/historial.csv` (and `proyectos/proyectos.json`) list every link, its folder, state and number of clips.
+- The same link again: `si_ya_existe = continuar` resumes in its folder (nothing transcribed again), `nueva_version` makes `_v2` with the saved transcript, `desde_cero` redoes everything.
+- A transcript from an earlier run of the same video in another Drive folder (e.g. `MyDrive/StreamClipper/analysis`) is copied into the new folder, never moved.
+- YouTube bot check: a `cookies.txt` at `MyDrive/privado/cookies.txt` is used automatically (or set `cookies_path`). It gives access to the account: use a secondary account and never share it.
+- The streamer profile (`MyDrive/StreamClipper/streamers/<name>.json`) defaults to the channel name.
+
 ## Quickstart: Windows PC
 
 You need Python 3.10 or newer and ffmpeg (`winget install Gyan.FFmpeg`, then open a new terminal). Open PowerShell in the repo folder and put your stream recording there as `my_stream.mp4`.
