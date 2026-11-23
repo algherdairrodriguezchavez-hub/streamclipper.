@@ -451,6 +451,7 @@ AUTO_INTRO = """# StreamClipper automático: pega un enlace, recibe los clips
 2. Ejecuta la **celda 1** una vez por sesión (instala StreamClipper y conecta tu Google Drive).
 3. Pega el enlace en la **celda 2** y pulsa ▶. Para otro enlace, cambia el enlace y pulsa ▶ otra vez.
 4. La **celda 3** muestra la lista de todo lo procesado.
+5. Si YouTube dice "confirma que no eres un bot", la **celda 4** hace un diagnóstico y dice la causa.
 
 Cada enlace tiene su propia carpeta en `MyDrive/StreamClipper/proyectos/`: un enlace nuevo nunca usa ni
 sobrescribe los clips de otro. Si Colab se desconecta, ejecuta la celda 1 y luego la 2 con el mismo enlace:
@@ -485,7 +486,8 @@ if shutil.which("ffmpeg") is None:
     subprocess.run(["apt-get", "-qq", "update"], check=True)
     subprocess.run(["apt-get", "-qq", "install", "-y", "ffmpeg"], check=True)
 
-EXTRAS = "asr,gpu,vision" if HAS_GPU else "asr,vision"
+# youtube = Deno + the PO Token plugin, which YouTube needs from cloud machines like Colab
+EXTRAS = "asr,gpu,vision,youtube" if HAS_GPU else "asr,vision,youtube"
 LOCAL_SRC = os.environ.get("STREAMCLIPPER_LOCAL_SRC", "")  # tests only: install from a local checkout
 if LOCAL_SRC:
     project = Path("/tmp/streamclipper_src")
@@ -511,8 +513,11 @@ else:
 
     drive.mount("/content/drive")
 
+from streamclipper import ytaccess
 from streamclipper.autorun import base_dir, find_cookies
 
+print("Preparando el acceso a YouTube (JavaScript y PO Token, 1 a 3 minutos la primera vez) ...")
+YT_STATUS = ytaccess.setup()
 print("Tus proyectos se guardan en:", base_dir() / "proyectos")
 COOKIES = find_cookies()
 print("Cookies de YouTube:", COOKIES or "no encontradas (si YouTube pide verificar que no eres un bot, "
@@ -602,6 +607,25 @@ else:
     print("También en Drive:", base_dir() / "historial.csv")
 """
 
+AUTO_DIAGNOSE = """#@title 4. Diagnóstico de YouTube (si la celda 2 dice "not a bot")
+#@markdown Hace dos descargas reales de 10 segundos (sin y con tus cookies) y dice la causa: cookies inválidas,
+#@markdown falta JavaScript o PO Token, o bloqueo de la IP de Colab. No muestra el contenido de tus cookies.
+enlace_prueba = ""  #@param {type:"string"}
+
+if "SC_INSTALLED" not in globals():
+    print("Primero ejecuta la celda 1 (Preparar).")
+else:
+    from streamclipper import ytaccess
+    from streamclipper.autorun import find_cookies
+
+    _link = enlace_prueba.strip() or globals().get("enlace", "").strip()
+    if not _link:
+        print("Pega un enlace de YouTube en 'enlace_prueba' y pulsa ▶.")
+    else:
+        DIAG = ytaccess.diagnose(_link, globals().get("cookies_path", "").strip() or find_cookies(),
+                                 status=globals().get("YT_STATUS"))
+"""
+
 
 def build_auto() -> nbformat.NotebookNode:
     nb = new_notebook()
@@ -615,7 +639,7 @@ def build_auto() -> nbformat.NotebookNode:
         "{STYLES}": json.dumps([AUTO_STYLE] + list(STYLES)),
         "{HOOKS}": json.dumps(list(HOOK_STYLES)),
     }
-    for src in (AUTO_SETUP, AUTO_PROCESS, AUTO_HISTORY):
+    for src in (AUTO_SETUP, AUTO_PROCESS, AUTO_HISTORY, AUTO_DIAGNOSE):
         for key, val in choices.items():
             src = src.replace(key, val)
         cell = new_code_cell(src.rstrip("\n"))

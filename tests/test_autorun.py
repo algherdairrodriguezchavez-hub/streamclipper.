@@ -130,7 +130,8 @@ def test_auto_notebook_cells():
     nb = nbformat.read(str(Path(__file__).resolve().parents[1] / "notebooks" / "StreamClipper_Automatico.ipynb"), 4)
     nbformat.validate(nb)
     code = [c.source for c in nb.cells if c.cell_type == "code"]
-    assert len(code) == 3
+    assert len(code) == 4
+    assert "ytaccess.setup()" in code[0] and "ytaccess.diagnose(" in code[3] and ",youtube" in code[0]
     for i, src in enumerate(code, start=1):
         compile(src, f"cell {i}", "exec")
     assert "process_link(" in code[1] and 'enlace = ""  #@param' in code[1]

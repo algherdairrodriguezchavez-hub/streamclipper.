@@ -2,6 +2,7 @@
 
 import hashlib
 import importlib.util
+import os
 import re
 import shutil
 import subprocess
@@ -121,8 +122,17 @@ def set_ytdlp_cookies(path=None) -> None:
         _YTDLP_COOKIES.append(str(path))
 
 
+def _js_runtime_args() -> list:
+    """--js-runtimes for a Deno installed next to this Python (pip 'deno') but not on PATH; [] otherwise."""
+    if shutil.which("deno"):
+        return []  # yt-dlp finds Deno on PATH by itself
+    near = Path(sys.executable).with_name("deno.exe" if os.name == "nt" else "deno")
+    return ["--js-runtimes", f"deno:{near}"] if near.is_file() else []
+
+
 def ytdlp_cmd() -> list:
     extra = ["--cookies", _YTDLP_COOKIES[0]] if _YTDLP_COOKIES else []
+    extra += _js_runtime_args()
     if importlib.util.find_spec("yt_dlp") is not None:
         return [sys.executable, "-m", "yt_dlp"] + extra
     exe = shutil.which("yt-dlp")

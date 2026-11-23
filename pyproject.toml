@@ -19,7 +19,7 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=1.24",
-    "yt-dlp>=2024.10.0",
+    "yt-dlp[default]>=2026.10.26",
     "streamlink>=6.8",
 ]
 
@@ -33,6 +33,8 @@ gpu = [
 vision = ["mediapipe>=1.2,<2", "onnxruntime>=1.17"]
 # For platforms without mediapipe wheels: Haar face detection only (5.x dropped the cascades).
 vision-haar = ["opencv-python-headless>=4.8,<5"]
+# YouTube from cloud machines (Colab): Deno runs the yt-dlp-ejs challenge solver and the bgutil PO Token server.
+youtube = ["deno>=2.3", "bgutil-ytdlp-pot-provider>=2.0.2"]
 dev = ["pytest>=7", "ruff>=0.5", "nbformat>=5", "pyyaml>=6"]
 
 [project.urls]

@@ -68,6 +68,7 @@ The notebook uses only form fields and inline HTML (no web UI, no tunnels), so i
 - A transcript from an earlier run of the same video in another Drive folder (e.g. `MyDrive/StreamClipper/analysis`) is copied into the new folder, never moved.
 - YouTube bot check: a `cookies.txt` at `MyDrive/privado/cookies.txt` is used automatically (or set `cookies_path`). It gives access to the account: use a secondary account and never share it.
 - The streamer profile (`MyDrive/StreamClipper/streamers/<name>.json`) defaults to the channel name.
+- Cell 1 installs what YouTube needs from a cloud machine (yt-dlp with `yt-dlp-ejs`, Deno, and the bgutil PO Token provider, whose server it starts on 127.0.0.1:4416). When YouTube still refuses a download, cell 2 runs a diagnosis (also cell 4): `cookies` (invalid, expired or rotated: export again from a private window), `cookies_formato`, `js`, `pot`, `ip` (YouTube refuses this Colab IP even with valid cookies, a JS runtime and a PO token), `red` or `otro`. None of this is guaranteed to pass YouTube's bot check from a cloud IP.
 
 ## Quickstart: Windows PC
 

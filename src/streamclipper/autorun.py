@@ -227,12 +227,21 @@ def _update_entry(base: Path, folder: str, **changes) -> None:
     save_index(base, entries)
 
 
+def _is_block(e: ToolError) -> bool:
+    from streamclipper.colab import is_bot_block
+
+    low = f"{e} {e.hint or ''}".lower()
+    return is_bot_block(low) or "http error 403" in low or "http error 429" in low
+
+
 def process_link(source: str, existing: str = "continuar", cookies: str = "", streamer: str = "",
-                 base: Path = None, pipeline=None, **options) -> dict:  # fmt: skip
+                 base: Path = None, pipeline=None, diagnose_on_block: bool = True, diagnose_fn=None,
+                 **options) -> dict:  # fmt: skip
     """
     Paste a link, get the clips: prepare_project, then run_pipeline into that folder (render on, resume on).
     The streamer profile defaults to the channel name. Returns run_pipeline's result plus 'project'.
     options go to run_pipeline (max_clips, min_score, hook_style, cam_fit, min_dur ...).
+    When YouTube refuses the download, ytaccess.diagnose runs (diagnose_on_block) and prints the cause.
     """
     from streamclipper.colab import run_pipeline, streamer_profile_path
 
@@ -254,7 +263,18 @@ def process_link(source: str, existing: str = "continuar", cookies: str = "", st
             **options,
         )
     except ToolError as e:
-        _update_entry(base, entry["carpeta"], estado="error: " + str(e)[:120])
+        estado = "error: " + str(e)[:120]
+        if diagnose_on_block and _is_block(e) and re.match(r"^https?://", entry["enlace"], re.I):
+            from streamclipper import ytaccess
+
+            print("\nYouTube rechazó la descarga. Diagnóstico automático:")
+            try:
+                rep = (diagnose_fn or ytaccess.diagnose)(entry["enlace"], cookies)
+                e.verdict = rep["verdict"]
+                estado = f"error: YouTube ({rep['verdict']})"
+            except Exception as de:  # the diagnosis must never hide the original error
+                print("El diagnóstico no pudo terminar:", de)
+        _update_entry(base, entry["carpeta"], estado=estado)
         raise
     mp4s = result.get("mp4s") or []
     _update_entry(base, entry["carpeta"], estado="listo", clips=len(mp4s))
