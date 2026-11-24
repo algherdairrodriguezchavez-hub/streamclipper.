@@ -258,3 +258,17 @@ def test_report_shows_the_style_and_a_restyle_command(tmp_path):
     assert "comic-burst" in csv_p.read_text(encoding="utf-8-sig").splitlines()[1]
     page = html_p.read_text(encoding="utf-8")
     assert "Captions: comic-burst" in page and "--caption-style bold-pop" in page
+
+
+def test_seam_shows_the_title_first_then_the_captions_on_the_cam_line(tmp_path):
+    from streamclipper.layout import SEAM_DOWN, SEAM_OVERLAP
+
+    plan = _plan("bold-pop", _caps("bold-pop"), hook_style="clean")
+    plan["caption_opts"] = {"position": "seam"}
+    info = build_ass(plan, layout_boxes("9:16", "split"), tmp_path / "s.ass", FONTS)
+    assert info["position"] == "seam" and info["hook_only_until"] == 2.0
+    words = [sp for sp, t in zip(info["spans"], info["texts"], strict=True) if t is not None]
+    assert words and min(sp[0] for sp in words) >= 2.0 - 0.01  # no caption while the title shows
+    doc = (tmp_path / "s.ass").read_text(encoding="utf-8")
+    assert f"\\an5\\pos(540,{672 + SEAM_DOWN})" in doc  # title and captions centred on the cam line
+    assert info["top_min"] >= 672 - SEAM_OVERLAP

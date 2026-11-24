@@ -102,12 +102,57 @@ def fit_cam_box(face: list, cam_box: list, fit: str, ratio: str, vw: int, vh: in
 
 def game_box_for(face: list, corner: str, opts: dict, vw: int, vh: int, cam: list = None):
     """Gameplay crop (normalised) clear of the whole streamer (and of the cam overlay box `cam`, when given)
-    for a corner cam, or None (see gameplay_box_avoiding)."""
+    for a corner cam, or None (see gameplay_box_avoiding). A centred crop that does not fit tries the side;
+    with opts always_split the last resort is fallback_game_box (the streamer may show at its edge)."""
     from streamclipper.vision import person_box
 
     aspect = GAME_ASPECT.get(opts.get("ratio") or "9:16", GAME_ASPECT["9:16"])
     keep_out = union(person_box(face, corner), cam)
-    return gameplay_box_avoiding(keep_out, vw, vh, aspect, anchor=opts.get("game_anchor") or "side")
+    anchor = opts.get("game_anchor") or "side"
+    game = gameplay_box_avoiding(keep_out, vw, vh, aspect, anchor=anchor)
+    if game is None and anchor == "center":
+        game = gameplay_box_avoiding(keep_out, vw, vh, aspect, anchor="side")
+    if game is None and opts.get("always_split"):
+        game = fallback_game_box(keep_out, opts.get("ratio") or "9:16", vw, vh)
+    return game
+
+
+def fallback_game_box(keep_out, ratio: str, vw: int, vh: int) -> list:
+    """Full-height gameplay crop with the game panel's aspect, centred, then moved away from keep_out as far
+    as the frame allows (used only when no crop clear of the streamer exists: the split is always kept)."""
+    aspect = GAME_ASPECT.get(ratio, GAME_ASPECT["9:16"])
+    w = min(1.0, aspect * vh / vw)
+    x0 = 0.5 - w / 2
+    if keep_out:
+        if (keep_out[0] + keep_out[2]) / 2 < 0.5:
+            x0 = min(max(x0, keep_out[2]), 1.0 - w)
+        else:
+            x0 = max(min(x0, keep_out[0] - w), 0.0)
+    return [round(x0, 5), 0.0, round(x0 + w, 5), 1.0]
+
+
+def face_cam_box(face: list, opts: dict, vw: int, vh: int) -> list:
+    """Cam panel crop around a face with no cam overlay (a big or full-screen cam): the tight fit inside
+    the whole frame, or a box of the cam aspect centred on the face."""
+    ratio = opts.get("ratio") or "9:16"
+    fit = opts.get("cam_fit") if opts.get("cam_fit") in FIT_WIDTH else "tight"
+    box = fit_cam_box(face, [0.0, 0.0, 1.0, 1.0], fit, ratio, vw, vh)
+    if box != [0.0, 0.0, 1.0, 1.0]:
+        return box
+    aspect = CAM_ASPECT.get(ratio, CAM_ASPECT["9:16"])
+    h = min(1.0, 3.2 * (face[3] - face[1]))
+    w = min(1.0, h * vh * aspect / vw)
+    h = w * vw / aspect / vh
+    cx, cy = (face[0] + face[2]) / 2, (face[1] + face[3]) / 2
+    x0 = min(max(cx - w / 2, 0.0), 1.0 - w)
+    y0 = min(max(cy - h / 2, 0.0), 1.0 - h)
+    return [round(x0, 5), round(y0, 5), round(x0 + w, 5), round(y0 + h, 5)]
+
+
+def _corner_of_box(box: list) -> str:
+    """The frame corner nearest a normalised box (for the streamer profile)."""
+    cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+    return ("top" if cy < 0.5 else "bottom") + ("_left" if cx < 0.5 else "_right")
 
 
 def union(a, b):
@@ -140,6 +185,10 @@ def _part_box(res: dict, opts: dict, vw: int, vh: int) -> dict:
             game = game_box_for(res["face_box"], res["corner"], opts, vw, vh, res["cam_box"])
         if game is not None:
             return {"kind": "corner-cam", "corner": res["corner"], "face": res["face_box"], "cam": cam, "game": game}
+    if kind == "full-cam" and opts.get("always_split") and res.get("face_box"):
+        cam = face_cam_box(res["face_box"], opts, vw, vh)
+        game = fallback_game_box(cam, opts.get("ratio") or "9:16", vw, vh)
+        return {"kind": "full-cam", "corner": _corner_of_box(cam), "face": res["face_box"], "cam": cam, "game": game}
     return {"kind": kind or "no-cam", "corner": None, "face": None, "cam": None, "game": None}
 
 

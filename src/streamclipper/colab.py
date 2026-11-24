@@ -164,6 +164,10 @@ def _clip_argv(source: str, work: Path, o: dict) -> list:
         argv += ["--max-dur", f"{float(o['max_dur']):g}"]
     if float(o.get("min_pause", 0.55)) != 0.55:  # silences longer than this are cut (999 = keep every pause)
         argv += ["--min-pause", f"{float(o['min_pause']):g}"]
+    if (o.get("caption_position") or "auto") != "auto":
+        argv += ["--caption-position", str(o["caption_position"])]
+    if o.get("always_split"):
+        argv.append("--always-split")
     if (o.get("visual_rank") or "off") != "off":
         argv += ["--visual-rank", str(o["visual_rank"])]
     if o.get("streamer_profile"):
@@ -220,6 +224,8 @@ def run_pipeline(
     max_dur: float = 60.0,
     min_pause: float = 0.55,
     visual_rank: str = "off",
+    caption_position: str = "auto",
+    always_split: bool = False,
 ) -> dict:
     """
     Stream -> ranked clips (clips.json, clips.csv, index.html) -> MP4s + thumbnails (render) -> portable
@@ -235,7 +241,10 @@ def run_pipeline(
     min_dur/target_dur/max_dur = clip length in seconds (over 60 s the 59.5 s Shorts cap rises to max_dur, at
     most 180 s). min_pause = silences longer than this are cut (0.55 = podcast style; 3 = only long ones; 999 =
     keep the gameplay between lines). visual_rank = off|qwen-3b|qwen-7b: a local vision model (GPU) watches the
-    best candidates and re-orders them. None of these change the saved transcript.
+    best candidates and re-orders them. caption_position = auto|top|center|lower|seam (seam: captions and the
+    title centred on the line between the facecam and the gameplay; the title shows first, alone).
+    always_split=True keeps the facecam on top and the gameplay below on every clip with a face.
+    None of these change the saved transcript.
     """
     from streamclipper.cli import build_parser  # late import: cli imports every command module
     from streamclipper.commands import clip_stream
@@ -279,6 +288,8 @@ def run_pipeline(
         "max_dur": float(max_dur),
         "min_pause": float(min_pause),
         "visual_rank": visual_rank or "off",
+        "caption_position": caption_position or "auto",
+        "always_split": bool(always_split),
     }
     if opts["brand_kit"] and not Path(opts["brand_kit"]).is_file():
         raise ToolError("The brand kit file was not found.", "check the brand_kit path, or leave it empty")

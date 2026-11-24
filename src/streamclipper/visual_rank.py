@@ -23,8 +23,8 @@ MODELS = {
     "qwen-7b": "Qwen/Qwen2.5-VL-7B-Instruct",  # loaded in 4 bit (~6 GB): better judgement, slower
 }
 CHOICES = ("off", *MODELS)
-TOP_N = 24  # candidates rated (the rest keep their audio score, after the rated ones)
-FRAMES = 12  # frames per candidate
+TOP_N = 12  # candidates rated (the rest keep their audio score, after the rated ones)
+FRAMES = 8  # frames per candidate
 FRAME_W = 448  # frame width given to the model (keeps the prompt small)
 VISION_WEIGHT = 0.6  # final score = 0.4 audio + 0.6 vision
 TEXT_CHARS = 700  # transcript characters given per candidate
@@ -79,8 +79,9 @@ def _frame_times(s: float, e: float, n: int = FRAMES) -> list:
     return [s + step * (i + 0.5) for i in range(n)]
 
 
-def extract_frames(video: Path, times: list, out_dir: Path, offset: float = 0.0) -> list:
-    """One JPEG per time (seconds in the source; offset = where video starts in the source)."""
+def extract_frames(video, times: list, out_dir: Path, offset: float = 0.0) -> list:
+    """One JPEG per time (seconds in the source; offset = where video starts in the source). video is a
+    file or a direct stream URL."""
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = []
     for i, t in enumerate(times):
@@ -88,7 +89,7 @@ def extract_frames(video: Path, times: list, out_dir: Path, offset: float = 0.0)
         if not p.is_file():
             run_cmd(
                 ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-ss", f"{max(0.0, t - offset):.3f}",
-                 "-i", str(video), "-frames:v", "1", "-vf", f"scale={FRAME_W}:-2", "-q:v", "4", str(p)],
+                 "-i", str(video), "-frames:v", "1", "-an", "-vf", f"scale={FRAME_W}:-2", "-q:v", "4", str(p)],
                 "frame for the vision model",
             )  # fmt: skip
         if p.is_file():
@@ -96,8 +97,34 @@ def extract_frames(video: Path, times: list, out_dir: Path, offset: float = 0.0)
     return paths
 
 
+_STREAM = {}
+
+
+def stream_url(url: str) -> str:
+    """The direct URL of the link's 360p video-only stream (one yt-dlp call per run), or '' when unavailable."""
+    if url not in _STREAM:
+        import subprocess
+
+        from streamclipper.util import ytdlp_cmd
+
+        got = ""
+        try:
+            fmt = "bv*[height<=360][vcodec^=avc1]/bv*[height<=360]/wv*"
+            r = subprocess.run(
+                ytdlp_cmd() + ["-f", fmt, "-g", "--no-playlist", "--no-warnings", url],
+                capture_output=True, text=True, timeout=180,
+            )  # fmt: skip
+            lines = [ln for ln in (r.stdout or "").splitlines() if ln.startswith("http")]
+            got = lines[0] if r.returncode == 0 and lines else ""
+        except Exception:  # noqa: BLE001 - any problem: per-window downloads instead
+            got = ""
+        _STREAM[url] = got
+    return _STREAM[url]
+
+
 def candidate_frames(clip: dict, src: Path, url: str, work_dir: Path) -> list:
-    """Frames of a candidate: from the source video, or (a link) from a 360p download of just that window."""
+    """Frames of a candidate: from the source video; for a link, read straight from its 360p stream (seeks
+    only the needed bytes), else from a 360p download of just that window."""
     from streamclipper.hud.frames import has_video
 
     s, e = float(clip["start"]), float(clip["end"])
@@ -107,6 +134,14 @@ def candidate_frames(clip: dict, src: Path, url: str, work_dir: Path) -> list:
         return extract_frames(src, times, out_dir)
     if not url:
         return []
+    direct = stream_url(url)
+    if direct:
+        try:
+            frames = extract_frames(direct, times, out_dir)
+            if len(frames) >= len(times) // 2:
+                return frames
+        except Exception:  # noqa: BLE001 - expired or refused stream URL: download the window
+            _STREAM[url] = ""
     from streamclipper.download import download_slice
 
     slice_mp4 = out_dir / "low.mp4"

@@ -1189,6 +1189,11 @@ def make_crop_dict(crop_box):
     }
 
 
+# --caption-position seam: captions and the hook centred this far below the cam/gameplay line (a two-line
+# caption then covers at most SEAM_OVERLAP px of the cam panel's bottom, where the shoulders are, never the face)
+SEAM_DOWN = 40
+SEAM_OVERLAP = 110
+
 # Square frame (9:16): blurred full-bleed gameplay, the 6:5 gameplay frame 1080x900 at y=470,
 # hook banner in y 150-430 above it and captions from y=1400 below it.
 SQUARE_FRAME = {"y": 470, "h": 900, "hook_y": 290, "caption_y": 1400}
@@ -1206,6 +1211,7 @@ def layout_boxes(ratio: str, layout: str, main_h: int = None) -> dict:
         rects = {"cam": [0, 0, W, cam_h], "main": [0, cam_h, W, H - cam_h]}
         cap = {"align": 8, "y": cam_h + 28}
         pos = {"top": (8, cam_h + 28), "center": (5, cam_h + (H - cam_h) // 2), "lower": (2, H - (260 if tall else 60))}
+        pos["seam"] = (5, cam_h + SEAM_DOWN)
         hook = {"align": 8, "y": cam_h + 28, "bar_top": cam_h}
     elif layout == "hook-grabber":
         top_h = int(main_h or 1056)

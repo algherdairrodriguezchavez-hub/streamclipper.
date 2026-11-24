@@ -376,3 +376,50 @@ def test_correct_clip_sets_a_manual_crop_with_a_new_preview(tmp_path):
         correct_clip(str(ov), 5, "0,0,320,200")
     with pytest.raises(ToolError):
         correct_clip(str(ov), 2, "0,0,320")
+
+
+def test_always_split_keeps_the_face_on_top_and_the_game_below(monkeypatch):
+    import streamclipper.options as options
+
+    meta = {"width": VW, "height": VH, "dur": 30.0}
+    monkeypatch.setattr(options, "black_spans", lambda *a: [])
+    # a big cam lower-left: no crop clear of it exists, so 5.4 fell back to a face-only clip
+    big = {
+        "kind": "corner-cam",
+        "corner": "bottom_left",
+        "face_box": [0.3, 0.35, 0.45, 0.7],
+        "cam_box": [0.0, 0.2, 0.7, 1.0],
+    }
+    monkeypatch.setattr(options, "classify_layout", lambda *a: dict(big))
+    o, cam, game, note = options.clip_layout("x.mp4", meta, _opts(cam_fit="tight", game_anchor="center"), 0, 10)
+    assert o["layout"] == "full" and cam is None  # the old behaviour: a face crop
+    o, cam, game, note = options.clip_layout(
+        "x.mp4", meta, _opts(cam_fit="tight", game_anchor="center", always_split=True), 0, 10
+    )
+    assert o["layout"] == "split" and cam is not None and game is not None
+    assert game[3] - game[1] == 1.0 and game[0] >= 0.5  # full height, moved away from the streamer
+    assert "person_box" not in o  # the streamer may show at its edge: no streamer_clear row
+    # a big cam with no overlay border: the face crop on top, the rest of the picture below
+    full = {"kind": "full-cam", "corner": None, "face_box": [0.42, 0.2, 0.58, 0.5], "cam_box": None}
+    monkeypatch.setattr(options, "classify_layout", lambda *a: dict(full))
+    o, cam, game, note = options.clip_layout("x.mp4", meta, _opts(always_split=True), 0, 10)
+    assert o["layout"] == "split" and camfit._inside(full["face_box"], cam, 0.0) and game[3] == 1.0
+    assert abs(_px_aspect(cam) - 1080 / 672) < 0.03
+
+
+def test_fallback_game_box_moves_away_from_the_streamer():
+    left = camfit.fallback_game_box([0.0, 0.3, 0.3, 1.0], "9:16", VW, VH)
+    right = camfit.fallback_game_box([0.7, 0.3, 1.0, 1.0], "9:16", VW, VH)
+    assert left[0] >= 0.3 and right[2] <= 0.7 and left[3] == right[3] == 1.0
+    assert camfit.game_box_for([0.1, 0.5, 0.25, 0.75], "bottom_left", {"always_split": True, "game_anchor": "center"},
+                               VW, VH, [0.0, 0.38, 0.5, 1.0])  # fmt: skip
+
+
+def test_seam_captions_sit_on_the_cam_line():
+    from streamclipper.layout import SEAM_DOWN, caption_anchor, layout_boxes
+
+    lay = layout_boxes("9:16", "split")
+    assert caption_anchor(lay, "seam") == (5, 672 + SEAM_DOWN)
+    args = build_parser().parse_args(["clip-stream", "--input", "s.mp4", "--out", "w", "--caption-position", "seam",
+                                      "--always-split"])  # fmt: skip
+    assert args.caption_position == "seam" and args.always_split

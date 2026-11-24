@@ -383,6 +383,12 @@ def build_parser() -> argparse.ArgumentParser:
     cs.add_argument("--db", type=float, default=-48.0, help="RMS gate in dB")
     cs.add_argument("--min-pause", type=float, default=0.55, help="Pauses shorter than this stay inside a clip")
     cs.add_argument(
+        "--always-split",
+        action="store_true",
+        help="Keep the facecam-on-top / gameplay-below split on every clip with a face (never a face-only or "
+        "gameplay-only clip when a face is found; the gameplay crop may show the streamer's edge)",
+    )
+    cs.add_argument(
         "--visual-rank",
         choices=("off", "qwen-3b", "qwen-7b"),
         default="off",

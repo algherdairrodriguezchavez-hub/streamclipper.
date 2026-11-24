@@ -11,8 +11,12 @@
 - `--visual-rank off|qwen-3b|qwen-7b` (new `visualrank` extra): a local vision-language model (Qwen2.5-VL, on the GPU; 7B in 4 bit) watches 12 frames and reads the transcript of the best 24 candidates and rates them; the final score blends audio 40% and vision 60%. Ratings are cached in `analysis/vision_scores.json`; any model failure keeps the audio ranking. For links, only a 360p copy of each candidate window is downloaded.
 - Hook styles `clean` (white text on a rounded dark card), `clean-light` (black text on a white card) and `minimal` (white text, thin outline).
 - Automatic notebook: clips 60-75-90 s by default, `pausas` (mantener/solo_largas/cortar), `ver_video` (off/qwen-3b/qwen-7b, default qwen-3b) and the `clean` hook by default.
+- `--always-split`: every clip with a face keeps the facecam on top and the gameplay below. A centred gameplay crop that does not fit tries the side; when no crop clear of the streamer exists (big cams: the streamer's body box covers most of the frame), a full-height crop away from the cam is used instead of a face-only clip; a big cam with no overlay border is split too (face crop on top, the picture below).
+- `--caption-position seam`: captions and the hook title centred on the line between the facecam and the gameplay; the title shows first, alone, then the captions (the export gate does not expect captions under the title and allows seam captions over the bottom 110 px of the cam panel).
+- Faster renders: the final MP4 is encoded with NVENC (`h264_nvenc`, cq 19) when the GPU has it (Colab T4), libx264 otherwise; `STREAMCLIPPER_ENCODER=cpu` forces the CPU. `--visual-rank` rates 12 candidates with 8 frames each and reads the frames straight from the link's 360p stream (no window downloads when that works).
+- Automatic notebook: `siempre_dividido` (on), `caption_position = seam`, `hud = off` by default (the GTA 6 HUD profile is experimental and scans the whole stream).
 ### Changed
-- Sharper facecam: `tight`/`close` cam crops never enlarge the face more than 2.5x (the crop widens instead), crops enlarged over 1.2x get a light unsharp after the lanczos scale, panels are encoded at CRF 15 and the final render at CRF 18 (maxrate 16M) instead of 20 (12M).
+- Sharper facecam: `tight`/`close` cam crops never enlarge the face more than 2.5x (the crop widens instead), crops enlarged over 1.2x get a light unsharp after the lanczos scale, panels are encoded at CRF 15 and the final render at CRF 18 (maxrate 12M, the export gate's limit) instead of 20.
 ### Fixed
 - Resume: a clip is reused only when its window is the same (`_clip_key`); a new discovery with other lengths no longer reuses another window's MP4 for the same rank.
 ## 5.3.0 (2026-11-19)

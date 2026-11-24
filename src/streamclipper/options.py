@@ -272,7 +272,14 @@ def clip_layout(src: Path, meta: dict, opts: dict, start: float = None, end: flo
                 person = [min(person[0], c[0]), min(person[1], c[1]), max(person[2], c[2]), max(person[3], c[3])]
             aspect = 1080 / 1248 if opts["ratio"] == "9:16" else 1080 / 626
             game = gameplay_box_avoiding(person, vw, vh, aspect, anchor=opts.get("game_anchor") or "side")
+            if game is None and opts.get("game_anchor") == "center":  # a centred crop does not fit: the side
+                game = gameplay_box_avoiding(person, vw, vh, aspect, anchor="side")
             opts = dict(opts, person_box=person)
+            if game is None and opts.get("always_split"):
+                from streamclipper.camfit import fallback_game_box
+
+                game = fallback_game_box(person, opts["ratio"], vw, vh)
+                opts.pop("person_box", None)  # the streamer may show at the edge of this crop
             black = black_spans(src, game, vw, vh, s, e) if game else []
             if black:
                 # the game screen is black (stream start, loading) while the cam is lit: show the streamer
@@ -296,6 +303,15 @@ def clip_layout(src: Path, meta: dict, opts: dict, start: float = None, end: flo
                     (f"layout: corner-cam ({res['corner']}) -> full (no gameplay crop clear of the streamer)"),
                 )
         return opts, cam, game, f"layout: corner-cam ({res['corner']}) -> {layout}"
+    if kind == "full-cam" and layout in CAM_LAYOUTS and opts.get("always_split") and res.get("face_box"):
+        # a big cam with no overlay border: the face on top, the rest of the picture (the game) below
+        from streamclipper.camfit import face_cam_box, fallback_game_box
+
+        face = res["face_box"]
+        cam = face_cam_box(face, opts, vw, vh)
+        if game is None:
+            game = fallback_game_box(cam, opts["ratio"], vw, vh)
+        return dict(opts), cam, game, "layout: full-cam -> split (face on top, picture below; --always-split)"
     copts = dict(opts)
     if layout in CAM_LAYOUTS or (layout == "full" and not opts.get("preset")):
         copts["layout"] = "full"

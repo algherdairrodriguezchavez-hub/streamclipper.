@@ -203,6 +203,9 @@ def build_ass(plan: dict, lay: dict, out_path: Path, fonts_dir: Path, brand: dic
     align, y = caption_anchor(lay, copts.get("position") or "auto", st.anim_up)
     hook_a = (lay.get("hook") or {}).get("align", lay["caption"]["align"])
     hook_y = (lay.get("hook") or {}).get("y", lay["caption"]["y"])
+    seam = (copts.get("position") or "auto") == "seam" and "seam" in (lay.get("positions") or {})
+    if seam:  # the title shows first at the captions' place, then the captions take over
+        hook_a, hook_y = align, y
     events, tops = [], []
     spans = []  # [s, e, x0, y0, x1, y1]: where each caption/hook shows (estimated box; the export gate's face check)
     texts = []  # plain words of each span (None for a hook banner): the export gate's caption coverage
@@ -291,8 +294,8 @@ def build_ass(plan: dict, lay: dict, out_path: Path, fonts_dir: Path, brand: dic
         cap_h = len(lines) * cap_size * 1.2
         cy = y
         if hooks and s < hook_end - 0.01:
-            if tease_end > 0:
-                continue  # the tease shows only the hook headline
+            if tease_end > 0 or seam:
+                continue  # the tease (or the seam title) shows only the hook headline
             cap_top = _est_top(align, y, len(lines), cap_size) - st.anim_up
             if hook_bottom is not None and cap_top < hook_bottom + 20 and (hstyle == "top-bar" or hook_a == align):
                 # same place as the hook banner: move the caption just below it
@@ -362,6 +365,8 @@ def build_ass(plan: dict, lay: dict, out_path: Path, fonts_dir: Path, brand: dic
         "emoji_font": bool(fonts.emoji),
         "spans": spans,
         "texts": texts,
+        "position": "seam" if seam else (copts.get("position") or "auto"),
+        "hook_only_until": round(hook_end, 3) if seam and hooks else 0.0,
     }
 
 

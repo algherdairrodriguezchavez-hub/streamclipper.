@@ -543,10 +543,18 @@ pausas = "mantener"  #@param ["mantener", "solo_largas", "cortar"]
 #@markdown **Ver el video** con un modelo de visión en la GPU T4 (gratis, sin claves): elige los momentos con acción.
 #@markdown `qwen-3b` es más rápido; `qwen-7b` juzga mejor y tarda más. `off` = solo audio y voz.
 ver_video = "qwen-3b"  #@param ["off", "qwen-3b", "qwen-7b"]
+#@markdown `hud = auto` también lee el HUD del juego (WASTED, estrellas). En GTA 6 es experimental y en un directo
+#@markdown largo revisa miles de fotogramas y puede añadir mucho tiempo, por eso viene apagado.
+hud = "off"  #@param ["off", "auto"]
 #@markdown **Estilo**
 caption_style = "auto"  #@param {STYLES}
 hook_style = "clean"  #@param {HOOKS}
+#@markdown `seam` = subtítulos y título en el centro, en la unión entre la cara y el gameplay (el título sale
+#@markdown primero, solo, unos segundos; después los subtítulos).
+caption_position = "seam"  #@param ["seam", "auto", "top", "center", "lower"]
 #@markdown **Cámara y gameplay** (se eligen en cada clip). `streamer` vacío = se usa el nombre del canal.
+#@markdown `siempre_dividido`: la cara del streamer arriba y el gameplay abajo en todos los clips.
+siempre_dividido = True  #@param {type:"boolean"}
 cam_fit = "tight"  #@param ["standard", "tight", "close"]
 game_anchor = "center"  #@param ["side", "center"]
 cam_track = True  #@param {type:"boolean"}
@@ -582,7 +590,7 @@ else:
             ratio="9:16",
             llm="none",
             drafts=False,
-            hud="auto",
+            hud=hud,
             cam_fit=cam_fit,
             game_anchor=game_anchor,
             cam_track="auto" if cam_track else "off",
@@ -591,6 +599,8 @@ else:
             max_dur=max_dur,
             min_pause={"mantener": 999, "solo_largas": 3, "cortar": 0.55}[pausas],
             visual_rank=ver_video,
+            caption_position=caption_position,
+            always_split=siempre_dividido,
         )
     except ToolError as e:
         print("ERROR:", e)

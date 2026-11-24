@@ -188,7 +188,7 @@ CLEAN_HOOKS = ("clean", "clean-light", "minimal")
 DEFAULT_HOOK_STYLE = "bold-box"
 
 CAPTION_CASES = ("upper", "title", "as-is")
-CAPTION_POSITIONS = ("auto", "top", "center", "lower")
+CAPTION_POSITIONS = ("auto", "top", "center", "lower", "seam")  # seam: centred on the cam/gameplay line (split)
 
 
 def style_name(name: str) -> str:

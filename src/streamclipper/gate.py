@@ -174,7 +174,12 @@ def gate_mp4(path: Path, timeline_json: Path = None) -> list:
     if top is None:
         row("captions_clear_of_face", True, "no captions", "N/A")
     else:
-        row("captions_clear_of_face", top >= cam_bottom, f"caption top y={top} vs cam panel bottom {cam_bottom}")
+        from streamclipper.layout import SEAM_OVERLAP
+
+        seam = (tl.get("caption") or {}).get("position") == "seam"
+        limit = cam_bottom - (SEAM_OVERLAP if seam else 0)
+        what = f" (seam captions: up to {SEAM_OVERLAP} px over the cam panel's bottom)" if seam else ""
+        row("captions_clear_of_face", top >= limit, f"caption top y={top} vs cam panel bottom {cam_bottom}{what}")
     cs = tl.get("cam_source") or {}
     box = tl.get("cam_box_px")
     if not box or not cs.get("path") or not Path(cs["path"]).is_file():

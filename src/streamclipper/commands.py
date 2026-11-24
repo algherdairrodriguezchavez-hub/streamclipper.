@@ -361,6 +361,8 @@ def clip_stream(args) -> dict:
     opts = resolve_options(args, {})
     if opts["hook_mode"] == "uncut-16x9-stack" and opts["layout"] == "split":
         opts["layout"] = "uncut-stack"
+    if getattr(args, "always_split", False):  # the facecam on top and the gameplay below on every clip
+        opts["always_split"] = True
     if float(getattr(args, "max_dur", 60.0) or 60.0) > 60.0:  # long clips: the 59.5 s Shorts cap rises with max_dur
         opts["max_timeline"] = min(LONG_TIMELINE_CAP, float(args.max_dur) + 2.5)
     if not args.no_draft:
