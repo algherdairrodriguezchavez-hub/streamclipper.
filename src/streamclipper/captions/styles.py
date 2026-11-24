@@ -179,7 +179,11 @@ HOOK_STYLES = {
     "bold-box": "black text on a yellow box, hype words red",
     "outline-glow": "white text with a glowing yellow outline",
     "top-bar": "white text on a full-width red bar",
+    "clean": "white text on one rounded, dark translucent card, fade in (no colours)",
+    "clean-light": "black text on one rounded white card, fade in (no colours)",
+    "minimal": "white text with a thin dark outline and soft shadow, fade in (no box)",
 }
+CLEAN_HOOKS = ("clean", "clean-light", "minimal")
 
 DEFAULT_HOOK_STYLE = "bold-box"
 

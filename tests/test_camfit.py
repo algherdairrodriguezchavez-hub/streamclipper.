@@ -52,14 +52,28 @@ def test_tight_and_close_fit_frame_the_face_bigger_inside_the_overlay():
     assert camfit.fit_cam_box(FACE, OVERLAY, "standard", "9:16", VW, VH) == OVERLAY
     face_w = FACE[2] - FACE[0]
     prev = OVERLAY[2] - OVERLAY[0]
-    for fit in ("tight", "close"):
-        box = camfit.fit_cam_box(FACE, OVERLAY, fit, "9:16", VW, VH)
+    for fit in ("tight", "close"):  # a 4K source: the face has enough pixels for a close crop
+        box = camfit.fit_cam_box(FACE, OVERLAY, fit, "9:16", 2 * VW, 2 * VH)
         assert abs(_px_aspect(box) - 1080 / 672) < 0.02
         assert OVERLAY[0] <= box[0] and OVERLAY[1] <= box[1] and box[2] <= OVERLAY[2] and box[3] <= OVERLAY[3]
         assert camfit._inside(FACE, box, 0.08)
         width = box[2] - box[0]
         assert width < prev and face_w / width > 0.3  # the face fills more of the panel each step
         prev = width
+
+
+def test_fit_never_enlarges_a_small_face_more_than_the_cap():
+    for fit in ("tight", "close"):  # 1080p: a 3-face-width crop would be ~345 px, scaled x3.1 to 1080
+        box = camfit.fit_cam_box(FACE, OVERLAY, fit, "9:16", VW, VH)
+        assert 1080 / ((box[2] - box[0]) * VW) <= camfit.MAX_CAM_UPSCALE + 0.01
+        assert camfit._inside(FACE, box, 0.08) and box[2] <= OVERLAY[2]
+
+
+def test_sharpen_only_for_enlarged_crops():
+    from streamclipper.layout import sharpen
+
+    assert sharpen(1080, 1080) == "" and sharpen(950, 1080) == ""
+    assert sharpen(432, 1080).startswith(",unsharp=5:5:0.")
 
 
 def test_fit_keeps_the_overlay_when_a_closer_crop_would_cut_the_face():
@@ -286,7 +300,16 @@ def test_colab_argv_is_unchanged_with_the_defaults_and_passes_the_new_options(tm
 
     url = "https://www.youtube.com/watch?v=abc"
     plain = _clip_argv(url, tmp_path, _base_opts())
-    for flag in ("--cam-fit", "--game-anchor", "--cam-track", "--min-dur", "--streamer-profile", "--preview-only"):
+    for flag in (
+        "--cam-fit",
+        "--game-anchor",
+        "--cam-track",
+        "--min-dur",
+        "--streamer-profile",
+        "--preview-only",
+        "--min-pause",
+        "--visual-rank",
+    ):
         assert flag not in plain
     argv = _clip_argv(
         url,
@@ -294,16 +317,30 @@ def test_colab_argv_is_unchanged_with_the_defaults_and_passes_the_new_options(tm
         _base_opts(
             cam_fit="tight", game_anchor="center", cam_track="auto", streamer_profile="p.json",
             layout_overrides="o.json", preview_only=True, min_dur=38, target_dur=42, max_dur=48,
+            min_pause=999, visual_rank="qwen-3b",
         ),
     )  # fmt: skip
     joined = " ".join(argv)
     parts = ["--cam-fit tight", "--game-anchor center", "--cam-track auto", "--streamer-profile p.json"]
     parts += ["--layout-overrides o.json", "--preview-only", "--min-dur 38", "--target-dur 42", "--max-dur 48"]
+    parts += ["--min-pause 999", "--visual-rank qwen-3b"]
     for part in parts:
         assert part in joined, part
     assert "--render" not in argv  # a preview renders nothing
     args = build_parser().parse_args(argv)
-    assert args.cam_fit == "tight" and args.max_dur == 48
+    assert args.cam_fit == "tight" and args.max_dur == 48 and args.min_pause == 999
+
+
+def test_long_clips_raise_the_timeline_cap_and_new_windows_get_new_keys():
+    from streamclipper.clipplan import LONG_TIMELINE_CAP, MAX_TIMELINE, fit_timeline
+    from streamclipper.commands import _clip_key
+
+    segs = [{"cut_start": 0.0, "cut_end": 85.0, "kind": "payoff"}]
+    assert sum(p["cut_end"] - p["cut_start"] for p in fit_timeline(segs, [], 92.5)) == pytest.approx(85.0)
+    assert MAX_TIMELINE == 59.5 and LONG_TIMELINE_CAP == 179.5
+    a = {"start": 10.0, "end": 30.0, "segments": [1, 2]}
+    assert _clip_key("k", a) == _clip_key("k", dict(a))
+    assert _clip_key("k", a) != _clip_key("k", {**a, "end": 80.0})
 
 
 def test_streamer_profile_path_is_a_safe_file_name(monkeypatch, tmp_path):

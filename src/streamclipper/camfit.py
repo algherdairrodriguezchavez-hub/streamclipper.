@@ -27,6 +27,8 @@ CAM_FITS = ("standard", "tight", "close")
 CAM_TRACKS = ("off", "auto")
 FIT_WIDTH = {"tight": 3.0, "close": 2.3}  # cam crop width in face widths (Haar-sized face box)
 FIT_HEIGHT = 1.6  # the cam crop is at least this many face heights tall (forehead room and the chin)
+CAM_PANEL_W = 1080  # every canvas is 1080 wide: the cam crop is scaled to this width
+MAX_CAM_UPSCALE = 2.5  # a tighter crop is widened so the face is never enlarged more than this (blur)
 CAM_ASPECT = {"9:16": 1080 / 672, "1:1": 1080 / 454}
 GAME_ASPECT = {"9:16": 1080 / 1248, "1:1": 1080 / 626}
 FULL_ASPECT = {"9:16": 1080 / 1920, "1:1": 1.0}
@@ -84,7 +86,8 @@ def fit_cam_box(face: list, cam_box: list, fit: str, ratio: str, vw: int, vh: in
     fw, fh = fx1 - fx0, fy1 - fy0
     w = FIT_WIDTH[fit] * fw
     h = max(w / aspect, FIT_HEIGHT * fh)
-    w = h * aspect
+    w = max(h * aspect, CAM_PANEL_W / MAX_CAM_UPSCALE)  # a small face: widen rather than blow up the pixels
+    h = w / aspect
     cx, cy = (fx0 + fx1) / 2, (fy0 + fy1) / 2 + 0.1 * fh
     lim = [cam_box[0] * vw, cam_box[1] * vh, cam_box[2] * vw, cam_box[3] * vh]
     # never bigger than the overlay: shrink to it, keeping the aspect

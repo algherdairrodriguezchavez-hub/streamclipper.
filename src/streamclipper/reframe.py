@@ -352,6 +352,8 @@ def assign_words(words: list, pieces: list) -> list:
 def build_panel_graph(segs: list, ws: float, we: float, ratio: str, vw: int, vh: int) -> str:
     """ffmpeg filter_complex for the composite panel of [ws, we] (input 0 seeked to ws): one trim per segment,
     per-window crop with pan expressions, scale, vstack/overlay, concat -> [v]."""
+    from streamclipper.layout import sharpen  # layout imports this module
+
     W, H = canvas(ratio)
     frames = segment_frames(segs, ws, we)
     n = len(segs)
@@ -372,9 +374,10 @@ def build_panel_graph(segs: list, ws: float, we: float, ratio: str, vw: int, vh:
         layout = seg["layout"]
         if layout == "split":
             (_c, _cx, _cy, _cw, cam_h), _g = panel_rects("split", ratio)
+            sharp = sharpen(seg["windows"]["cam"][2], W)
             parts.append(
                 f"{src},split=2[c{i}][g{i}];"
-                f"[c{i}]{crop('cam')},scale={W}:{cam_h}:flags=lanczos,setsar=1[cc{i}];"
+                f"[c{i}]{crop('cam')},scale={W}:{cam_h}:flags=lanczos{sharp},setsar=1[cc{i}];"
                 f"[g{i}]{crop('game')},scale={W}:{H - cam_h}:flags=lanczos,setsar=1[gg{i}];"
                 f"[cc{i}][gg{i}]vstack=2,format=yuv420p[v{i}]"
             )

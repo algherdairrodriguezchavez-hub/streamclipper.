@@ -336,7 +336,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_select_flags(dc, 0, "clips")
     dc.add_argument("--min-dur", type=float, default=15.0, help="Shortest clip in seconds")
     dc.add_argument(
-        "--max-dur", type=float, default=60.0, help="Longest clip in seconds (rendered clips stay <= 59.5 s)"
+        "--max-dur", type=float, default=60.0, help="Longest clip in s (<= 60: clip <= 59.5 s; more: up to 180 s)"
     )
     dc.add_argument("--target-dur", type=float, default=30.0, help="Preferred clip length in seconds")
     tg = dc.add_mutually_exclusive_group()
@@ -378,10 +378,16 @@ def build_parser() -> argparse.ArgumentParser:
     cs.add_argument("--target-dur", type=float, default=30.0, help="Target clip duration in seconds")
     cs.add_argument("--min-dur", type=float, default=15.0, help="Shortest clip in seconds")
     cs.add_argument(
-        "--max-dur", type=float, default=60.0, help="Longest clip in seconds (rendered clips stay <= 59.5 s)"
+        "--max-dur", type=float, default=60.0, help="Longest clip in s (<= 60: clip <= 59.5 s; more: up to 180 s)"
     )
     cs.add_argument("--db", type=float, default=-48.0, help="RMS gate in dB")
     cs.add_argument("--min-pause", type=float, default=0.55, help="Pauses shorter than this stay inside a clip")
+    cs.add_argument(
+        "--visual-rank",
+        choices=("off", "qwen-3b", "qwen-7b"),
+        default="off",
+        help="A local vision model (GPU, e.g. the Colab T4) watches the best candidates and re-orders them",
+    )
     cs.add_argument(
         "--transcribe",
         action="store_true",

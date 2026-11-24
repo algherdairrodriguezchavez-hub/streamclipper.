@@ -340,6 +340,15 @@ def gameplay_box_avoiding(person: list, vw: int, vh: int, aspect: float, min_h: 
     return [round(x0 / vw, 5), round(y0 / vh, 5), round((x0 + cw) / vw, 5), round((y0 + ch) / vh, 5)]
 
 
+def sharpen(src_w: float, out_w: float) -> str:
+    """',unsharp=...' for a crop enlarged more than 1.2x (lanczos alone leaves a soft face), else ''."""
+    zoom = out_w / max(1.0, float(src_w))
+    if zoom <= 1.2:
+        return ""
+    amount = round(min(0.9, 0.35 + 0.2 * (zoom - 1.2)), 2)
+    return f",unsharp=5:5:{amount}:5:5:0.0"
+
+
 def _encode_panel(video_path: Path, out_mp4: Path, filter_complex: str, ss_args: list, keep_audio: bool, what: str):
     tmp = out_mp4.with_name(out_mp4.stem + ".part.mp4")
     cmd = [
@@ -360,7 +369,7 @@ def _encode_panel(video_path: Path, out_mp4: Path, filter_complex: str, ss_args:
         cmd += ["-map", "0:a:0?", "-c:a", "aac", "-b:a", "192k", "-ar", "48000"]
     else:
         cmd += ["-an"]
-    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "17", "-pix_fmt", "yuv420p", str(tmp)]
+    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "15", "-pix_fmt", "yuv420p", str(tmp)]
     run_cmd(cmd, what)
     os.replace(tmp, out_mp4)
 
@@ -383,10 +392,10 @@ def render_fill_panel(
     vw, vh = meta["width"], meta["height"]
     region = region_px or (0, 0, vw, vh)
     cw, ch, x0, y0 = _fill_crop(region, vw, vh, w / h)
-    tag = file_tag(video_path, (cw, ch, x0, y0), w, h, start_s, dur_s, keep_audio, "v5")
+    tag = file_tag(video_path, (cw, ch, x0, y0), w, h, start_s, dur_s, keep_audio, "v6")
     out = out_dir / f"{Path(video_path).stem}_{name}_{w}x{h}_{tag}.mp4"
     if not out.is_file():
-        fc = f"[0:v]crop={cw}:{ch}:{x0}:{y0},scale={w}:{h}:flags=lanczos,setsar=1[v]"
+        fc = f"[0:v]crop={cw}:{ch}:{x0}:{y0},scale={w}:{h}:flags=lanczos{sharpen(cw, w)},setsar=1[v]"
         _encode_panel(video_path, out, fc, _ss_args(start_s, dur_s), keep_audio, f"{name} panel render")
     return fwd(out)
 

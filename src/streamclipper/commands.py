@@ -29,6 +29,8 @@ from streamclipper.captions.styles import (
 )
 from streamclipper.chat import load_chat
 from streamclipper.clipplan import (
+    LONG_TIMELINE_CAP,
+    MAX_TIMELINE,
     _tease_bounds,
     extract_window,
     fit_timeline,
@@ -359,6 +361,8 @@ def clip_stream(args) -> dict:
     opts = resolve_options(args, {})
     if opts["hook_mode"] == "uncut-16x9-stack" and opts["layout"] == "split":
         opts["layout"] = "uncut-stack"
+    if float(getattr(args, "max_dur", 60.0) or 60.0) > 60.0:  # long clips: the 59.5 s Shorts cap rises with max_dur
+        opts["max_timeline"] = min(LONG_TIMELINE_CAP, float(args.max_dur) + 2.5)
     if not args.no_draft:
         guard_capcut(resolve_draft_root(args.draft_root), args.close_capcut)
     assets = ensure_bundled_assets(find_capcut_local(), install=not args.no_draft)
@@ -395,6 +399,10 @@ def clip_stream(args) -> dict:
         url=args.url,
         title=title if args.url else src.stem,
     )
+    if (getattr(args, "visual_rank", "off") or "off") != "off":
+        from streamclipper import visual_rank  # late import: torch/transformers only when asked
+
+        res["clips"] = visual_rank.rerank(res["clips"], src, args.url, work_dir / "analysis", args.visual_rank)
     print_clip_table(res["clips"])
     out_json = work_dir / "clips.json"
     doc = clips_document(res, args.url or fwd(src), title if args.url else src.stem, st)
@@ -428,7 +436,8 @@ def clip_stream(args) -> dict:
             break
         n = len(plans)
         proj_name = f"{args.prefix}_{n + 1:02d}" if len(make) > 1 else args.prefix
-        done = None if args.overwrite else _made_before(res["state"], clip["rank"], make_key, work_dir, args)
+        ckey = _clip_key(make_key, clip)
+        done = None if args.overwrite else _made_before(res["state"], clip["rank"], ckey, work_dir, args)
         if done is not None:  # a re-run with the same inputs (e.g. after a Colab disconnect) keeps finished clips
             plan, ok = done
             print(
@@ -468,7 +477,7 @@ def clip_stream(args) -> dict:
             mp4 = work_dir / f"{plan['name']}.mp4"
             results.append((plan["name"], render_and_gate(plan, mp4)))
             _link_outputs(doc["clips"][idx], mp4, work_dir)
-        res["state"].mark_rendered(clip["rank"], plan["name"], key=make_key)
+        res["state"].mark_rendered(clip["rank"], plan["name"], key=ckey)
     camfit.save_profile(layout_ctx["profile"], _profile_settings(opts))
     if results:
         save_clips(out_json, doc)
@@ -491,6 +500,12 @@ def _make_key(opts: dict, args, hook_override: str, numbered: bool) -> str:
     if getattr(args, "layout_overrides", ""):
         keep["layout_overrides"] = camfit.overrides_key(args.layout_overrides)
     return hashlib.sha1(json.dumps(keep, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:16]
+
+
+def _clip_key(make_key: str, clip: dict) -> str:
+    """make_key + this clip's window: a new discovery (other length/pauses) never reuses another window's MP4."""
+    win = f"{clip.get('start', 0):.2f}-{clip.get('end', 0):.2f}-{len(clip.get('segments') or [])}"
+    return hashlib.sha1(f"{make_key}|{win}".encode("utf-8")).hexdigest()[:16]
 
 
 def _made_before(state, rank, key: str, work_dir: Path, args):
@@ -765,7 +780,7 @@ def make_stream_clip(
             segs = cut_black(segs, spans, words)
     verbatim = (win_file, ws, 0.0, wmeta["dur"], asr, work_dir / "analysis")
     segs, words, removed = _apply_fillers(segs, words, clip["peak"], opts, f"Clip {idx + 1}", verbatim, ws)
-    segs = fit_timeline(segs, words)
+    segs = fit_timeline(segs, words, opts.get("max_timeline") or MAX_TIMELINE)
     hook = hook_override or clip["hook_headline"]
     if opts.get("profanity_filter"):
         hook = " ".join(mask_profanity(w) for w in hook.split(" "))

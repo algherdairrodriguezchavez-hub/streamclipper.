@@ -322,7 +322,8 @@ def _tease_bounds(clip: dict, words: list, lo: float, hi: float) -> tuple:
     return max(lo, a), min(hi, b)
 
 
-MAX_TIMELINE = 59.5  # Shorts-safe: YouTube Shorts / Reels limit is 60 s
+MAX_TIMELINE = 59.5  # Shorts-safe default; --max-dur over 60 raises it (opts["max_timeline"])
+LONG_TIMELINE_CAP = 179.5  # YouTube Shorts and Instagram Reels take up to 3 minutes
 MIN_TEASE = 1.2
 
 

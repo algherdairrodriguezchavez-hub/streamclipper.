@@ -132,6 +132,7 @@ def test_auto_notebook_cells():
     code = [c.source for c in nb.cells if c.cell_type == "code"]
     assert len(code) == 4
     assert "ytaccess.setup()" in code[0] and "ytaccess.diagnose(" in code[3] and ",youtube" in code[0]
+    assert ",visualrank" in code[0] and "visual_rank=ver_video" in code[1] and "min_pause=" in code[1]
     for i, src in enumerate(code, start=1):
         compile(src, f"cell {i}", "exec")
     assert "process_link(" in code[1] and 'enlace = ""  #@param' in code[1]

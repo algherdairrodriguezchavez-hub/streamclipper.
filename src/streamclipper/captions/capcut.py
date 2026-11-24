@@ -557,7 +557,7 @@ def capcut_fields(st: CaptionStyle, active: str, font: str = "", emoji: bool = F
 
 
 def hook_capcut_fields(hook_style: str) -> dict:
-    """CapCut look of the hook banner styles (bold-box, outline-glow, top-bar)."""
+    """CapCut look of the hook banner styles (bold-box, outline-glow, top-bar, clean, minimal)."""
     if hook_style == "top-bar":
         return {
             "font": "anton",
@@ -568,6 +568,12 @@ def hook_capcut_fields(hook_style: str) -> dict:
         }
     if hook_style == "outline-glow":
         return {"font": "anton", "glow": True, "glow_preset": "neon", "glow_color": "yellow"}
+    if hook_style == "clean":
+        return {"font": "anton", "glow": False, "background": NEON_PALETTE["black"][1], "colour_map": {}}
+    if hook_style == "clean-light":
+        return {"font": "anton", "glow": False, "background": "#FFFFFF", "colour_map": {"white": "black"}}
+    if hook_style == "minimal":
+        return {"font": "anton", "glow": False, "colour_map": {}}
     return {
         "font": "anton",
         "glow": False,

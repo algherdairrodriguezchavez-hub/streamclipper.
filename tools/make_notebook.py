@@ -487,7 +487,7 @@ if shutil.which("ffmpeg") is None:
     subprocess.run(["apt-get", "-qq", "install", "-y", "ffmpeg"], check=True)
 
 # youtube = Deno + the PO Token plugin, which YouTube needs from cloud machines like Colab
-EXTRAS = "asr,gpu,vision,youtube" if HAS_GPU else "asr,vision,youtube"
+EXTRAS = "asr,gpu,vision,youtube,visualrank" if HAS_GPU else "asr,vision,youtube"
 LOCAL_SRC = os.environ.get("STREAMCLIPPER_LOCAL_SRC", "")  # tests only: install from a local checkout
 if LOCAL_SRC:
     project = Path("/tmp/streamclipper_src")
@@ -533,12 +533,19 @@ si_ya_existe = "continuar"  #@param ["continuar", "nueva_version", "desde_cero"]
 #@markdown **Clips**
 max_clips = 3  #@param {type:"integer"}
 min_score = 40  #@param {type:"slider", min:0, max:100, step:5}
-min_dur = 38  #@param {type:"integer"}
-target_dur = 42  #@param {type:"integer"}
-max_dur = 48  #@param {type:"integer"}
+#@markdown Duración en segundos (Shorts y Reels aceptan hasta 180).
+min_dur = 60  #@param {type:"integer"}
+target_dur = 75  #@param {type:"integer"}
+max_dur = 90  #@param {type:"integer"}
+#@markdown Silencios: `mantener` deja el gameplay entre frases, `solo_largas` corta pausas de más de 3 s,
+#@markdown `cortar` quita cada silencio (estilo podcast, clips mucho más cortos).
+pausas = "mantener"  #@param ["mantener", "solo_largas", "cortar"]
+#@markdown **Ver el video** con un modelo de visión en la GPU T4 (gratis, sin claves): elige los momentos con acción.
+#@markdown `qwen-3b` es más rápido; `qwen-7b` juzga mejor y tarda más. `off` = solo audio y voz.
+ver_video = "qwen-3b"  #@param ["off", "qwen-3b", "qwen-7b"]
 #@markdown **Estilo**
 caption_style = "auto"  #@param {STYLES}
-hook_style = "top-bar"  #@param {HOOKS}
+hook_style = "clean"  #@param {HOOKS}
 #@markdown **Cámara y gameplay** (se eligen en cada clip). `streamer` vacío = se usa el nombre del canal.
 cam_fit = "tight"  #@param ["standard", "tight", "close"]
 game_anchor = "center"  #@param ["side", "center"]
@@ -582,6 +589,8 @@ else:
             min_dur=min_dur,
             target_dur=target_dur,
             max_dur=max_dur,
+            min_pause={"mantener": 999, "solo_largas": 3, "cortar": 0.55}[pausas],
+            visual_rank=ver_video,
         )
     except ToolError as e:
         print("ERROR:", e)

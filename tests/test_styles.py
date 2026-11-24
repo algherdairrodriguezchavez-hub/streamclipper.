@@ -76,9 +76,9 @@ def test_full_layout_captions_leave_a_low_face_clear(tmp_path):
     )
 
 
-def test_registry_has_15_styles_and_3_hook_styles():
+def test_registry_has_15_styles_and_6_hook_styles():
     assert len(STYLES) == 15
-    assert set(HOOK_STYLES) == {"bold-box", "outline-glow", "top-bar"}
+    assert set(HOOK_STYLES) == {"bold-box", "outline-glow", "top-bar", "clean", "clean-light", "minimal"}
     for alias, target in STYLE_ALIASES.items():
         assert style_name(alias) == target
     assert style_name("nope") == ""

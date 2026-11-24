@@ -162,6 +162,10 @@ def _clip_argv(source: str, work: Path, o: dict) -> list:
             argv += [flag, f"{float(o[key]):g}"]
     if float(o.get("max_dur", 60.0)) != 60.0:
         argv += ["--max-dur", f"{float(o['max_dur']):g}"]
+    if float(o.get("min_pause", 0.55)) != 0.55:  # silences longer than this are cut (999 = keep every pause)
+        argv += ["--min-pause", f"{float(o['min_pause']):g}"]
+    if (o.get("visual_rank") or "off") != "off":
+        argv += ["--visual-rank", str(o["visual_rank"])]
     if o.get("streamer_profile"):
         argv += ["--streamer-profile", str(o["streamer_profile"])]
     if o.get("layout_overrides"):
@@ -214,6 +218,8 @@ def run_pipeline(
     min_dur: float = 15.0,
     target_dur: float = 30.0,
     max_dur: float = 60.0,
+    min_pause: float = 0.55,
+    visual_rank: str = "off",
 ) -> dict:
     """
     Stream -> ranked clips (clips.json, clips.csv, index.html) -> MP4s + thumbnails (render) -> portable
@@ -226,7 +232,10 @@ def run_pipeline(
     a JSON file of the streamer's cam positions (created/updated), layout_overrides = per-clip crops (the
     layout_overrides.json that preview_only=True writes, with "auto": false on the clips to correct).
     preview_only=True finds the clips and writes layout_preview/*.jpg + layout_overrides.json; renders nothing.
-    min_dur/target_dur/max_dur = clip length in seconds. None of these change the saved transcript.
+    min_dur/target_dur/max_dur = clip length in seconds (over 60 s the 59.5 s Shorts cap rises to max_dur, at
+    most 180 s). min_pause = silences longer than this are cut (0.55 = podcast style; 3 = only long ones; 999 =
+    keep the gameplay between lines). visual_rank = off|qwen-3b|qwen-7b: a local vision model (GPU) watches the
+    best candidates and re-orders them. None of these change the saved transcript.
     """
     from streamclipper.cli import build_parser  # late import: cli imports every command module
     from streamclipper.commands import clip_stream
@@ -268,6 +277,8 @@ def run_pipeline(
         "min_dur": float(min_dur),
         "target_dur": float(target_dur),
         "max_dur": float(max_dur),
+        "min_pause": float(min_pause),
+        "visual_rank": visual_rank or "off",
     }
     if opts["brand_kit"] and not Path(opts["brand_kit"]).is_file():
         raise ToolError("The brand kit file was not found.", "check the brand_kit path, or leave it empty")

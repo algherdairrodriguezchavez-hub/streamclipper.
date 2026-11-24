@@ -35,6 +35,8 @@ vision = ["mediapipe>=1.2,<2", "onnxruntime>=1.17"]
 vision-haar = ["opencv-python-headless>=4.8,<5"]
 # YouTube from cloud machines (Colab): Deno runs the yt-dlp-ejs challenge solver and the bgutil PO Token server.
 youtube = ["deno>=2.3", "bgutil-ytdlp-pot-provider>=2.0.2"]
+# --visual-rank: Qwen2.5-VL on the GPU (torch comes with Colab); bitsandbytes loads the 7B model in 4 bit.
+visualrank = ["transformers>=4.49", "accelerate>=0.33", "bitsandbytes>=0.43; sys_platform == 'linux'"]
 dev = ["pytest>=7", "ruff>=0.5", "nbformat>=5", "pyyaml>=6"]
 
 [project.urls]

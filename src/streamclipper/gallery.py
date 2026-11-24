@@ -36,6 +36,9 @@ HOOK_SAMPLES = {
     "bold-box": "HE DIDN'T SEE THAT COMING",
     "outline-glow": "WAIT FOR THE END",
     "top-bar": "CHAT WENT CRAZY",
+    "clean": "NO VIO VENIR ESTO",
+    "clean-light": "MIRA LO QUE PASA",
+    "minimal": "ESPERA AL FINAL",
 }
 SAMPLE_TEXT = "this is how your captions look"  # styles added later without their own sample
 SAMPLE_DUR = 4.0

@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 from streamclipper.captions.styles import (
+    CLEAN_HOOKS,
     DEFAULT_HOOK_STYLE,
     EMOJI_RE,
     FONT_FILES,
@@ -109,6 +110,27 @@ def _ass_text(text: str, max_chars: int = 16) -> str:
     return _join(_tokens(text, max_chars), word)
 
 
+def _text_width(text: str, font_file: Path, size: float) -> float:
+    """Width in px of one line at this ASS font size (Pillow when installed, else ~0.5 of the size per character)."""
+    try:
+        from PIL import ImageFont
+
+        font = ImageFont.truetype(str(font_file), 200)
+        asc, desc = font.getmetrics()  # libass scales a font so that ascent + descent = the style's size
+        return float(font.getlength(text)) * size / max(1, asc + desc)
+    except (ImportError, OSError, ValueError):
+        return len(text) * size * 0.5
+
+
+def _round_rect(w: int, h: int, r: int) -> str:
+    """ASS drawing of a w x h rectangle with corner radius r (Bezier corners), origin top-left."""
+    r = max(0, min(r, w // 2, h // 2))
+    return (
+        f"m {r} 0 l {w - r} 0 b {w} 0 {w} 0 {w} {r} l {w} {h - r} b {w} {h} {w} {h} {w - r} {h} "
+        f"l {r} {h} b 0 {h} 0 {h} 0 {h - r} l 0 {r} b 0 0 0 0 {r} 0"
+    )
+
+
 def _est_top(align: int, y: float, n_lines: int, size: float) -> float:
     h = n_lines * size * 1.2
     return y if align == 8 else (y - h / 2 if align == 5 else y - h)
@@ -133,6 +155,9 @@ class _Fonts:
         self.cap = full("baloo" if any_dev else key) or full("barlow") or "Arial"
         hook_dev = any(_has_devanagari(c.get("text")) for c in hooks)
         self.hook = full("baloo" if hook_dev else "anton") or "Arial"
+        clean_key = "baloo" if hook_dev else "poppins"  # the clean / clean-light / minimal hook styles
+        self.clean = full(clean_key) or self.hook
+        self.clean_file = Path(fonts_dir) / FONT_FILES[clean_key]
         self.emoji = full("emoji") if (Path(fonts_dir) / FONT_FILES["emoji"]).is_file() else ""
 
 
@@ -172,7 +197,7 @@ def build_ass(plan: dict, lay: dict, out_path: Path, fonts_dir: Path, brand: dic
     hook_box_col = _hex_col(box_hex) if box_hex else _style_col("yellow")
     bar_col = _hex_col(box_hex) if box_hex else _style_col("red")
     cap_size = round(st.size * k)
-    hook_size = round((80 if hstyle == "top-bar" else 96) * k)
+    hook_size = round({"top-bar": 80, "clean": 68, "clean-light": 68, "minimal": 76}.get(hstyle, 96) * k)
     X = W // 2
 
     align, y = caption_anchor(lay, copts.get("position") or "auto", st.anim_up)
@@ -210,6 +235,30 @@ def build_ass(plan: dict, lay: dict, out_path: Path, fonts_dir: Path, brand: dic
             spans.append([round(s, 3), round(e, 3), 0, bar_top, W, bar_top + bar_h])
             texts.append(None)
             hook_bottom = max(hook_bottom or 0, bar_top + bar_h)
+            continue
+        if hstyle in CLEAN_HOOKS:
+            plain = _join(lines, lambda w, col, _k: _ass_escape(w))
+            fade = "\\fad(160,160)"
+            if hstyle == "minimal":
+                ev(4, s, e, "HookMinimal", f"{{\\an{hook_a}\\pos({X},{hook_y}){fade}}}{plain}")
+                pad = 10
+            else:  # one rounded card behind all lines, sized to the longest line
+                padx, pad = 40, 22
+                text_w = max(_text_width(" ".join(w for w, _ in ln), fonts.clean_file, hook_size) for ln in lines)
+                bw, bh = int(min(W - 40, text_w + 2 * padx)), int(h + 2 * pad)
+                top = int(_est_top(hook_a, hook_y, n, hook_size) - pad)
+                light = hstyle == "clean-light"
+                fill = "\\1c&HFFFFFF&\\1a&H00&" if light else "\\1c&H141414&\\1a&H38&"
+                shape = _round_rect(bw, bh, 30)
+                card = f"{{\\an7\\pos({X - bw // 2},{top})\\bord0\\shad0{fill}{fade}\\p1}}{shape}{{\\p0}}"
+                ev(3, s, e, "Bar", card)
+                txt_style = "HookCleanLight" if light else "HookClean"
+                ev(4, s, e, txt_style, f"{{\\an{hook_a}\\pos({X},{hook_y}){fade}}}{plain}")
+            top = _est_top(hook_a, hook_y, n, hook_size) - pad
+            tops.append(top)
+            span(s, e, top, h + 2 * pad, lines, hook_size)
+            texts.append(None)
+            hook_bottom = max(hook_bottom or 0, top + h + 2 * pad)
             continue
         if hstyle == "bold-box":
 
@@ -285,6 +334,13 @@ def build_ass(plan: dict, lay: dict, out_path: Path, fonts_dir: Path, brand: dic
             f"{hook_box_col},&H00000000,-1,0,0,0,100,100,0,0,3,18,0,8,40,40,40,1",
             f"Style: Bar,{fonts.hook},{hook_size},{bar_col},{bar_col},&H00000000,&H00000000,"
             "0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1",
+            # clean hooks: the card is drawn as a shape (Bar layer); the text has no border
+            f"Style: HookClean,{fonts.clean},{hook_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,"
+            "-1,0,0,0,100,100,1,0,1,0,0,8,40,40,40,1",
+            f"Style: HookCleanLight,{fonts.clean},{hook_size},&H00141414,&H00141414,&H00000000,&H00000000,"
+            "-1,0,0,0,100,100,1,0,1,0,0,8,40,40,40,1",
+            f"Style: HookMinimal,{fonts.clean},{hook_size},&H00FFFFFF,&H00FFFFFF,&H20000000,&H80000000,"
+            "-1,0,0,0,100,100,1,0,1,4,3,8,40,40,40,1",
             "",
             "[Events]",
             "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",

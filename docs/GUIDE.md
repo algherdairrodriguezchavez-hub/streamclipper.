@@ -60,7 +60,7 @@ The notebook uses only form fields and inline HTML (no web UI, no tunnels), so i
 
 ## Quickstart: Google Colab, automatic mode (one link, one folder)
 
-`notebooks/StreamClipper_Automatico.ipynb` (Spanish) has three cells: 1 installs StreamClipper and connects Drive (once per session), 2 processes a link, 3 lists everything processed. Paste a link into cell 2 and press ▶; for another link, change it and press ▶ again.
+`notebooks/StreamClipper_Automatico.ipynb` (Spanish) has three cells: 1 installs StreamClipper and connects Drive (once per session), 2 processes a link, 3 lists everything processed. Paste a link into cell 2 and press ▶; for another link, change it and press ▶ again. Cell 2 defaults to 60-90 s clips that keep the gameplay between lines (`pausas = mantener`), the `clean` hook, and `ver_video = qwen-3b`: a vision model on the T4 rates the best 24 candidates from their frames and transcript before the clips are made (the first run downloads the model, about 7.5 GB, to the Colab disk). Set `ver_video = off` for audio-only ranking.
 
 - Every link gets its own folder: `MyDrive/StreamClipper/proyectos/<date>_<channel>_<video id>/` (MP4s, thumbnails, `index.html`, `clips.csv` and `analysis/` with the transcript and the progress). A new link never reuses or overwrites another link's results.
 - `MyDrive/StreamClipper/historial.csv` (and `proyectos/proyectos.json`) list every link, its folder, state and number of clips.
