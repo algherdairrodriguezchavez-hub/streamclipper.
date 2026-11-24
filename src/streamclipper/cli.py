@@ -223,10 +223,11 @@ def _add_layout_flags(p):
     p.add_argument("--filler-video", default=None, help="Filler video for the hook-grabber bottom panel")
     p.add_argument(
         "--cam-fit",
-        choices=["standard", "tight", "close"],
+        choices=["standard", "box", "tight", "close"],
         default=None,
         help="How close the facecam panel frames the face: standard (head and shoulders, the 5.3 look), "
-        "tight (about 3 face widths) or close (about 2.3); never outside the detected cam overlay",
+        "box (the whole detected cam frame), tight (about 3 face widths) or close (about 2.3); never outside the "
+        "detected cam overlay",
     )
     p.add_argument(
         "--game-anchor",
@@ -382,6 +383,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     cs.add_argument("--db", type=float, default=-48.0, help="RMS gate in dB")
     cs.add_argument("--min-pause", type=float, default=0.55, help="Pauses shorter than this stay inside a clip")
+    cs.add_argument(
+        "--game-follow",
+        choices=("off", "action"),
+        default="off",
+        help="action: the gameplay crop moves smoothly to where the motion is (characters, cars, shooting)",
+    )
     cs.add_argument(
         "--always-split",
         action="store_true",

@@ -23,7 +23,7 @@ from streamclipper.layout import _fill_crop, _norm_to_px, gameplay_box_avoiding
 from streamclipper.state import write_json_atomic
 from streamclipper.util import ToolError, run_cmd
 
-CAM_FITS = ("standard", "tight", "close")
+CAM_FITS = ("standard", "box", "tight", "close")
 CAM_TRACKS = ("off", "auto")
 FIT_WIDTH = {"tight": 3.0, "close": 2.3}  # cam crop width in face widths (Haar-sized face box)
 FIT_HEIGHT = 1.6  # the cam crop is at least this many face heights tall (forehead room and the chin)
@@ -78,6 +78,8 @@ def fit_cam_box(face: list, cam_box: list, fit: str, ratio: str, vw: int, vh: in
     inside the detected cam overlay cam_box so no gameplay shows next to the face. 'standard' (or a crop that
     would cut the face) returns cam_box unchanged. face is the detector's box (BlazeFace or Haar).
     """
+    if fit == "box" and face and cam_box:
+        return box_fit(face, cam_box, ratio, vw, vh)
     if fit not in FIT_WIDTH or not face or not cam_box:
         return cam_box
     aspect = CAM_ASPECT.get(ratio, CAM_ASPECT["9:16"])
@@ -98,6 +100,23 @@ def fit_cam_box(face: list, cam_box: list, fit: str, ratio: str, vw: int, vh: in
     out = [round(x0 / vw, 5), round(y0 / vh, 5), round((x0 + w) / vw, 5), round((y0 + h) / vh, 5)]
     # the gate fails a face that touches the panel edge: keep a margin, else the standard box
     return out if _inside(f, out, 0.08) else cam_box
+
+
+def box_fit(face: list, cam_box: list, ratio: str, vw: int, vh: int) -> list:
+    """cam fit 'box': the whole detected cam overlay, trimmed only to the cam panel's aspect (centred on the
+    face), so the panel shows the streamer's frame as it is on the stream and no gameplay around it."""
+    aspect = CAM_ASPECT.get(ratio, CAM_ASPECT["9:16"])
+    x0, y0, x1, y1 = cam_box[0] * vw, cam_box[1] * vh, cam_box[2] * vw, cam_box[3] * vh
+    w, h = x1 - x0, y1 - y0
+    if w / max(1.0, h) > aspect:
+        w = h * aspect
+    else:
+        h = w / aspect
+    cx, cy = (face[0] + face[2]) / 2 * vw, (face[1] + face[3]) / 2 * vh
+    nx = min(max(cx - w / 2, x0), x1 - w)
+    ny = min(max(cy - h / 2, y0), y1 - h)
+    out = [round(nx / vw, 5), round(ny / vh, 5), round((nx + w) / vw, 5), round((ny + h) / vh, 5)]
+    return out if _inside(face, out, 0.02) else cam_box
 
 
 def game_box_for(face: list, corner: str, opts: dict, vw: int, vh: int, cam: list = None):

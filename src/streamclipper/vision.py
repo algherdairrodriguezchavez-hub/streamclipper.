@@ -303,14 +303,33 @@ def snap_to_overlay(box: list, corner: str, frames: list, face: list) -> list:
         k = int(prof.argmax())
         if prof[k] > 3.0 * max(1e-3, float(np.median(gy[:, c0:c1]))):
             out[3 if top else 1] = (lo + k + 1) / h
-    if left:
-        out[0] = 0.0
-    else:
-        out[2] = 1.0
-    if top:
-        out[1] = 0.0
-    else:
-        out[3] = 1.0
+    # outer edges: the frame edge, unless the overlay floats with its own border between the edge and the face
+    # (a border only counts when the strip outside it changes much more than the cam picture inside it)
+    sd = st.std(axis=0)  # h x w: how much each pixel changes across the frames
+    out[0 if left else 2] = 0.0 if left else 1.0
+    lo, hi = (2, c0 - 2) if left else (int(fx1 * w) + 2, w - 3)
+    if hi - lo > 4:
+        prof = gx[r0:r1, lo:hi].mean(axis=0)
+        k = lo + int(prof.argmax())
+        outside = sd[r0:r1, :k] if left else sd[r0:r1, k + 1 :]
+        inside = sd[r0:r1, k + 1 : c0] if left else sd[r0:r1, int(fx1 * w) : k]
+        if (
+            prof.max() > 3.0 * max(1e-3, float(np.median(gx[r0:r1])))
+            and outside.size and inside.size and outside.mean() > 2.0 * max(1.0, inside.mean())
+        ):  # fmt: skip
+            out[0 if left else 2] = (k + 1) / w
+    out[1 if top else 3] = 0.0 if top else 1.0
+    lo, hi = (2, r0 - 2) if top else (int(fy1 * h) + 2, h - 3)
+    if hi - lo > 4:
+        prof = gy[lo:hi, c0:c1].mean(axis=1)
+        k = lo + int(prof.argmax())
+        outside = sd[:k, c0:c1] if top else sd[k + 1 :, c0:c1]
+        inside = sd[k + 1 : r0, c0:c1] if top else sd[int(fy1 * h) : k, c0:c1]
+        if (
+            prof.max() > 3.0 * max(1e-3, float(np.median(gy[:, c0:c1])))
+            and outside.size and inside.size and outside.mean() > 2.0 * max(1.0, inside.mean())
+        ):  # fmt: skip
+            out[1 if top else 3] = (k + 1) / h
     # never cut the face: the snapped box must still hold it with a small margin
     out = [
         min(out[0], fx0 - 0.1 * fw),

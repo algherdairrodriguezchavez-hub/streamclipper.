@@ -363,6 +363,8 @@ def clip_stream(args) -> dict:
         opts["layout"] = "uncut-stack"
     if getattr(args, "always_split", False):  # the facecam on top and the gameplay below on every clip
         opts["always_split"] = True
+    if (getattr(args, "game_follow", "off") or "off") != "off":  # the gameplay crop follows the action
+        opts["game_follow"] = args.game_follow
     if float(getattr(args, "max_dur", 60.0) or 60.0) > 60.0:  # long clips: the 59.5 s Shorts cap rises with max_dur
         opts["max_timeline"] = min(LONG_TIMELINE_CAP, float(args.max_dur) + 2.5)
     if not args.no_draft:
@@ -582,6 +584,35 @@ def _corner_of(box: list) -> str:
 
 
 def decide_clip_layout(
+    clip: dict, win_file: Path, wmeta: dict, ws: float, opts: dict, boxes: dict, layout_ctx: dict = None
+) -> tuple:
+    """_decide_clip_layout, then with opts game_follow == 'action' the gameplay crop follows the action
+    (action.follow_segments: reframe keyframes from frame-to-frame motion, the cam and streamer masked out)."""
+    o2, cam, game, note, rsegs = _decide_clip_layout(clip, win_file, wmeta, ws, opts, boxes, layout_ctx)
+    if opts.get("game_follow") != "action" or o2.get("layout") != "split":
+        return o2, cam, game, note, rsegs
+    from streamclipper import action
+
+    vw, vh = wmeta["width"], wmeta["height"]
+    if rsegs is None:
+        if cam is None or game is None:
+            return o2, cam, game, note, rsegs
+        runs = [{"start": 0.0, "cam": cam, "game": game, "corner": None}]
+        rsegs = camfit.runs_to_segments(runs, round(wmeta["dur"], 3), o2["ratio"], vw, vh)
+    masks = [o2[k] for k in ("person_box", "cam_overlay") if o2.get(k)]
+    try:
+        segs, how = action.follow_segments(rsegs, win_file, vw, vh, masks)
+    except Exception as e:  # noqa: BLE001 - motion analysis is a bonus: keep the fixed crop
+        print(f"Action following skipped ({type(e).__name__}: {e})")
+        return o2, cam, game, note, (rsegs if len(rsegs) > 1 else None)
+    if not any(s.get("keys") for s in segs) and len(segs) == 1:
+        return o2, cam, game, f"{note}; {how}", None
+    rctx = {"width": vw, "height": vh, "ratio": o2["ratio"]}
+    segs = reframe.validate_segments(segs, rctx, 0.0, round(wmeta["dur"], 3))
+    return o2, None, None, f"{note}; {how}", segs
+
+
+def _decide_clip_layout(
     clip: dict, win_file: Path, wmeta: dict, ws: float, opts: dict, boxes: dict, layout_ctx: dict = None
 ) -> tuple:
     """

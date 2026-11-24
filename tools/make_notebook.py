@@ -555,8 +555,11 @@ caption_position = "seam"  #@param ["seam", "auto", "top", "center", "lower"]
 #@markdown **Cámara y gameplay** (se eligen en cada clip). `streamer` vacío = se usa el nombre del canal.
 #@markdown `siempre_dividido`: la cara del streamer arriba y el gameplay abajo en todos los clips.
 siempre_dividido = True  #@param {type:"boolean"}
-cam_fit = "tight"  #@param ["standard", "tight", "close"]
+#@markdown `cam_fit = box`: el recuadro completo de la cámara del streamer (detectado solo). `tight`/`close`: más cerca de la cara.
+cam_fit = "box"  #@param ["box", "standard", "tight", "close"]
 game_anchor = "center"  #@param ["side", "center"]
+#@markdown `seguir_accion`: el recorte del gameplay se mueve suave hacia donde hay movimiento (personajes, autos, disparos).
+seguir_accion = True  #@param {type:"boolean"}
 cam_track = True  #@param {type:"boolean"}
 streamer = ""  #@param {type:"string"}
 #@markdown Ruta de `cookies.txt` en Drive. Vacío = se busca sola en `MyDrive/privado/cookies.txt`.
@@ -601,6 +604,7 @@ else:
             visual_rank=ver_video,
             caption_position=caption_position,
             always_split=siempre_dividido,
+            game_follow="action" if seguir_accion else "off",
         )
     except ToolError as e:
         print("ERROR:", e)

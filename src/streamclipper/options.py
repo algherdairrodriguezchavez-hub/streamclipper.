@@ -37,7 +37,7 @@ OPT_CHOICES = {
     "highlight_color": ("",) + HIGHLIGHT_COLOURS,
     "caption_font": ("",) + CAPTION_FONTS,
     "hook_style": tuple(HOOK_STYLES),
-    "cam_fit": ("standard", "tight", "close"),
+    "cam_fit": ("standard", "box", "tight", "close"),
     "game_anchor": ("side", "center"),
     "cam_track": ("off", "auto"),
 }
@@ -302,6 +302,8 @@ def clip_layout(src: Path, meta: dict, opts: dict, start: float = None, end: flo
                     game,
                     (f"layout: corner-cam ({res['corner']}) -> full (no gameplay crop clear of the streamer)"),
                 )
+        if opts.get("game_follow") and res.get("cam_box"):
+            opts = dict(opts, cam_overlay=res["cam_box"])  # masked out when the gameplay crop follows the action
         return opts, cam, game, f"layout: corner-cam ({res['corner']}) -> {layout}"
     if kind == "full-cam" and layout in CAM_LAYOUTS and opts.get("always_split") and res.get("face_box"):
         # a big cam with no overlay border: the face on top, the rest of the picture (the game) below

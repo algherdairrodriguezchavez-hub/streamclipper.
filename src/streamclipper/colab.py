@@ -168,6 +168,8 @@ def _clip_argv(source: str, work: Path, o: dict) -> list:
         argv += ["--caption-position", str(o["caption_position"])]
     if o.get("always_split"):
         argv.append("--always-split")
+    if (o.get("game_follow") or "off") != "off":
+        argv += ["--game-follow", str(o["game_follow"])]
     if (o.get("visual_rank") or "off") != "off":
         argv += ["--visual-rank", str(o["visual_rank"])]
     if o.get("streamer_profile"):
@@ -226,6 +228,7 @@ def run_pipeline(
     visual_rank: str = "off",
     caption_position: str = "auto",
     always_split: bool = False,
+    game_follow: str = "off",
 ) -> dict:
     """
     Stream -> ranked clips (clips.json, clips.csv, index.html) -> MP4s + thumbnails (render) -> portable
@@ -243,7 +246,9 @@ def run_pipeline(
     keep the gameplay between lines). visual_rank = off|qwen-3b|qwen-7b: a local vision model (GPU) watches the
     best candidates and re-orders them. caption_position = auto|top|center|lower|seam (seam: captions and the
     title centred on the line between the facecam and the gameplay; the title shows first, alone).
-    always_split=True keeps the facecam on top and the gameplay below on every clip with a face.
+    always_split=True keeps the facecam on top and the gameplay below on every clip with a face;
+    game_follow='action' moves the gameplay crop smoothly to where the action is. cam_fit='box' shows the
+    whole detected cam frame.
     None of these change the saved transcript.
     """
     from streamclipper.cli import build_parser  # late import: cli imports every command module
@@ -290,6 +295,7 @@ def run_pipeline(
         "visual_rank": visual_rank or "off",
         "caption_position": caption_position or "auto",
         "always_split": bool(always_split),
+        "game_follow": game_follow or "off",
     }
     if opts["brand_kit"] and not Path(opts["brand_kit"]).is_file():
         raise ToolError("The brand kit file was not found.", "check the brand_kit path, or leave it empty")

@@ -15,6 +15,9 @@
 - `--caption-position seam`: captions and the hook title centred on the line between the facecam and the gameplay; the title shows first, alone, then the captions (the export gate does not expect captions under the title and allows seam captions over the bottom 110 px of the cam panel).
 - Faster renders: the final MP4 is encoded with NVENC (`h264_nvenc`, cq 19) when the GPU has it (Colab T4), libx264 otherwise; `STREAMCLIPPER_ENCODER=cpu` forces the CPU. `--visual-rank` rates 12 candidates with 8 frames each and reads the frames straight from the link's 360p stream (no window downloads when that works).
 - Automatic notebook: `siempre_dividido` (on), `caption_position = seam`, `hud = off` by default (the GTA 6 HUD profile is experimental and scans the whole stream).
+- `--game-follow action` (new module `streamclipper.action`): the gameplay crop moves smoothly to where the motion is (motion-weighted centre, at most 12% of the width per second, a dead zone against wobble, still scenes keep the crop), kept clear of the cam overlay and the streamer; written as reframe keyframes.
+- `--cam-fit box`: the whole detected cam overlay, trimmed only to the cam panel's aspect. The overlay detection now also finds the outer border of a floating cam (not touching the frame edge) when the strip outside it is moving gameplay.
+- Automatic notebook: `cam_fit = box` and `seguir_accion` (on) by default.
 ### Changed
 - Sharper facecam: `tight`/`close` cam crops never enlarge the face more than 2.5x (the crop widens instead), crops enlarged over 1.2x get a light unsharp after the lanczos scale, panels are encoded at CRF 15 and the final render at CRF 18 (maxrate 12M, the export gate's limit) instead of 20.
 ### Fixed
