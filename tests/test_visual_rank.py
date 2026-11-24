@@ -34,33 +34,56 @@ class Judge:
     def __init__(self, choice):
         self.choice = choice
 
-    def ask(self, frames, prompt):
+    def ask(self, frames, prompt, labels=None):
         Judge.calls += 1
-        assert len(frames) == visual_rank.FRAMES and "mira" in prompt
+        assert len(frames) == visual_rank.FRAMES and "mira" in prompt and "GTA 6" in prompt
+        assert labels and labels[0].startswith("Fotograma 1 (segundo")
         start = int(frames[0].parent.name.split("_")[0]) / 1000
-        return 'Claro: {"score": %d, "reason": "persecución"}' % (20 if start < 15 else 95)
+        if start < 5:  # routine driving
+            return '{"evento": "conduccion", "rutina": true, "accion": 2, "sorpresa": 1, "humor": 0, "reaccion": 1}'
+        if start < 15:  # a chase, strong
+            return (
+                'Claro: {"evento": "persecucion", "rutina": false, "accion": 9, "sorpresa": 8, "humor": 3, '
+                '"reaccion": 8, "espectacular": 7, "curiosidad": 8, "historia": 7, "momento": 6, "gancho": 9, '
+                '"titulo": "¡Persecución épica!", "razon": "huye de la policía"}'
+            )
+        # the same kind of event again, close in time (a repeat), a bit weaker
+        return (
+            '{"evento": "persecucion", "accion": 7, "sorpresa": 6, "humor": 2, "reaccion": 6, "espectacular": 6, '
+            '"curiosidad": 6, "historia": 6, "momento": 2, "gancho": 4, "titulo": "OTRA VEZ"}'
+        )
 
     def close(self):
         pass
 
 
 def test_parse_answer_and_blend():
-    assert visual_rank.parse_answer('x {"score": 87, "reason": "choque"} y') == {"score": 87, "reason": "choque"}
-    assert visual_rank.parse_answer("score: 140")["score"] == 100
+    got = visual_rank.parse_answer(
+        'x {"accion": 10, "sorpresa": 10, "humor": 10, "reaccion": 10, "espectacular": 10,'
+        ' "curiosidad": 10, "historia": 10, "evento": "explosion", "titulo": "¡boom!"} y'
+    )
+    assert got["score"] == 100 and got["evento"] == "explosion" and got["titulo"] == "¡BOOM!" and not got["rutina"]
+    assert visual_rank.parse_answer("score: 140")["score"] == 100  # a bare overall score still works
     assert visual_rank.parse_answer("no sé") is None
-    assert visual_rank.blend(80, 30) == 50
+    assert visual_rank.parse_answer('{"evento": "menu", "accion": 5}')["rutina"]  # routine events
+    assert visual_rank.blend(80, 30) == 45 and visual_rank.blend(80, 30, routine=True) == 27
 
 
-def test_rerank_puts_the_action_first_and_caches(tmp_path, video):
+def test_rerank_keeps_the_good_chase_drops_routine_and_repeats(tmp_path, video):
     Judge.calls = 0
-    out = visual_rank.rerank(_clips(), video, "", tmp_path, "qwen-3b", judge_factory=Judge)
-    assert [c["start"] for c in out] == [20.0, 30.0, 0.0, 10.0]
-    assert [c["rank"] for c in out] == [1, 2, 3, 4]
-    assert out[0]["vision"] == {"score": 95, "reason": "persecución", "audio_score": 78}
-    assert out[0]["reason"].startswith("persecución")
+    clips = _clips()
+    for c in clips:
+        c["peak"] = c["start"] + 3.0
+    out = visual_rank.rerank(clips, video, "", tmp_path, "qwen-3b", judge_factory=Judge)
+    assert [c["start"] for c in out] == [10.0]  # routine (0 s) dropped, later chases are repeats
+    best = out[0]
+    assert best["rank"] == 1 and best["hook_headline"] == "¡PERSECUCIÓN ÉPICA!" and best["tease_ok"]
+    assert best["vision"]["evento"] == "persecucion" and best["vision"]["audio_score"] == 79
+    assert best["peak"] == best["vision"]["peak"] and 11.5 <= best["peak"] <= 15.5  # frame 6 of the clip
+    assert best["reason"].startswith("huye de la policía")
     assert Judge.calls == 4 and json.loads((tmp_path / "vision_scores.json").read_text())
     again = visual_rank.rerank(_clips(), video, "", tmp_path, "qwen-3b", judge_factory=Judge)
-    assert Judge.calls == 4 and [c["start"] for c in again] == [20.0, 30.0, 0.0, 10.0]  # cached
+    assert Judge.calls == 4 and [c["start"] for c in again] == [10.0]  # cached
 
 
 def test_a_broken_model_keeps_the_audio_ranking(tmp_path, video):

@@ -119,6 +119,23 @@ def box_fit(face: list, cam_box: list, ratio: str, vw: int, vh: int) -> list:
     return out if _inside(face, out, 0.02) else cam_box
 
 
+CONTAIN_TOL = 0.06  # a cam overlay whose aspect is within 6% of the panel's is cropped to fill, not letterboxed
+
+
+def contain_box(opts: dict, cam, vw: int, vh: int):
+    """cam fit 'box': the cam overlay in px [x, y, w, h] to show whole (scaled to fit, the sides filled with a
+    blurred copy of the cam itself, never gameplay) when its shape differs from the cam panel's, else None."""
+    ov = opts.get("cam_overlay")
+    if (opts.get("cam_fit") or "") != "box" or not ov or cam is None:
+        return None
+    aspect = CAM_ASPECT.get(opts.get("ratio") or "9:16", CAM_ASPECT["9:16"])
+    x0, y0 = int(round(ov[0] * vw)), int(round(ov[1] * vh))
+    w, h = int(round((ov[2] - ov[0]) * vw)) // 2 * 2, int(round((ov[3] - ov[1]) * vh)) // 2 * 2
+    if w < 16 or h < 16 or abs((w / h) / aspect - 1.0) <= CONTAIN_TOL:
+        return None
+    return [max(0, x0), max(0, y0), min(w, vw - x0), min(h, vh - y0)]
+
+
 def game_box_for(face: list, corner: str, opts: dict, vw: int, vh: int, cam: list = None):
     """Gameplay crop (normalised) clear of the whole streamer (and of the cam overlay box `cam`, when given)
     for a corner cam, or None (see gameplay_box_avoiding). A centred crop that does not fit tries the side;

@@ -158,6 +158,8 @@ class _Fonts:
         clean_key = "baloo" if hook_dev else "poppins"  # the clean / clean-light / minimal hook styles
         self.clean = full(clean_key) or self.hook
         self.clean_file = Path(fonts_dir) / FONT_FILES[clean_key]
+        self.gta = full("baloo" if hook_dev else "bangers") or self.hook  # the 'gta' hook style
+        self.gta_file = Path(fonts_dir) / FONT_FILES["baloo" if hook_dev else "bangers"]
         self.emoji = full("emoji") if (Path(fonts_dir) / FONT_FILES["emoji"]).is_file() else ""
 
 
@@ -197,7 +199,7 @@ def build_ass(plan: dict, lay: dict, out_path: Path, fonts_dir: Path, brand: dic
     hook_box_col = _hex_col(box_hex) if box_hex else _style_col("yellow")
     bar_col = _hex_col(box_hex) if box_hex else _style_col("red")
     cap_size = round(st.size * k)
-    hook_size = round({"top-bar": 80, "clean": 68, "clean-light": 68, "minimal": 76}.get(hstyle, 96) * k)
+    hook_size = round({"top-bar": 80, "clean": 68, "clean-light": 68, "minimal": 76, "gta": 112}.get(hstyle, 96) * k)
     X = W // 2
 
     align, y = caption_anchor(lay, copts.get("position") or "auto", st.anim_up)
@@ -263,6 +265,35 @@ def build_ass(plan: dict, lay: dict, out_path: Path, fonts_dir: Path, brand: dic
             texts.append(None)
             hook_bottom = max(hook_bottom or 0, top + h + 2 * pad)
             continue
+        if hstyle == "gta":
+            # brush letters tilted up, white with a heavy black outline, the last word yellow, a pink swoosh under
+            n_words = sum(len(ln) for ln in lines)
+
+            def gta_word(w, col, k_, n_words=n_words):  # _join counts the words: the last one is yellow
+                w = _ass_escape(w)
+                last = k_ == n_words - 1 and n_words > 1
+                return f"{{\\c{ASS_COLOURS['yellow']}}}{w}{{\\c&HFFFFFF&}}" if last or col != "white" else w
+
+            txt = _join(lines, gta_word)
+            pop = "\\fscx70\\fscy70\\t(0,140,\\fscx108\\fscy108)\\t(140,240,\\fscx100\\fscy100)"
+            ev(4, s, e, "HookGTA", f"{{\\an{hook_a}\\pos({X},{hook_y})\\frz4{pop}\\fad(0,180)}}{txt}")
+            text_w = max(_text_width(" ".join(w for w, _ in ln), fonts.gta_file, hook_size) for ln in lines)
+            top = _est_top(hook_a, hook_y, n, hook_size)
+            sw, sh = int(min(W - 120, text_w * 0.85)), max(10, int(hook_size * 0.13))
+            sy = int(top + h + 6)
+            swoosh = (
+                f"m 0 {sh} b {sw * 0.3} {sh * 0.2} {sw * 0.7} 0 {sw} 0 l {sw} {sh // 2} "
+                f"b {sw * 0.7} {sh // 2} {sw * 0.3} {sh} 0 {sh * 1.6}"
+            )
+            tags = f"\\an7\\pos({X - sw // 2},{sy})\\frz4\\bord3\\3c&H000000&\\1c&HC74BFF&\\fad(120,180)"
+            ev(3, s, e, "Bar", f"{{{tags}\\p1}}{swoosh}{{\\p0}}")
+            pad = 16
+            top -= pad
+            tops.append(top)
+            span(s, e, top, h + 2 * pad + sh + 6, lines, hook_size)
+            texts.append(None)
+            hook_bottom = max(hook_bottom or 0, top + h + 2 * pad + sh + 6)
+            continue
         if hstyle == "bold-box":
 
             def on_box(w, col, _k):
@@ -283,6 +314,22 @@ def build_ass(plan: dict, lay: dict, out_path: Path, fonts_dir: Path, brand: dic
         span(s, e, top, h + 2 * pad, lines, hook_size)
         texts.append(None)
         hook_bottom = max(hook_bottom or 0, top + h + 2 * pad)
+
+    # After a cold open: a short "a few seconds earlier" label while the clip goes back in time
+    if tease_end > 0 and (copts.get("rewind_label") or "") and segs and len(segs) > 1:
+        label = _ass_escape(str(copts["rewind_label"]))
+        size = round(44 * k)
+        cam = (lay.get("rects") or {}).get("cam") or lay.get("frame_cam")
+        ly = int((cam[1] + cam[3] + 190) if cam else H * 0.2)
+        lw = int(_text_width(label, fonts.clean_file, size) + 56)
+        lh = int(size * 1.2 + 24)
+        ls, le = tease_end, tease_end + 1.3
+        shape = _round_rect(lw, lh, lh // 2)
+        tags = f"\\an7\\pos({X - lw // 2},{ly - lh // 2})\\bord0\\shad0\\1c&H141414&\\1a&H30&\\fad(120,200)"
+        ev(3, ls, le, "Bar", f"{{{tags}\\p1}}{shape}{{\\p0}}")
+        ev(4, ls, le, "HookClean", f"{{\\an5\\pos({X},{ly})\\fs{size}\\fad(120,200)}}{label}")
+        spans.append([round(ls, 3), round(le, 3), X - lw // 2, ly - lh // 2, X + lw // 2, ly + lh // 2])
+        texts.append(None)
 
     # Word captions
     for c in words:
@@ -344,6 +391,8 @@ def build_ass(plan: dict, lay: dict, out_path: Path, fonts_dir: Path, brand: dic
             "-1,0,0,0,100,100,1,0,1,0,0,8,40,40,40,1",
             f"Style: HookMinimal,{fonts.clean},{hook_size},&H00FFFFFF,&H00FFFFFF,&H20000000,&H80000000,"
             "-1,0,0,0,100,100,1,0,1,4,3,8,40,40,40,1",
+            f"Style: HookGTA,{fonts.gta},{hook_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,"
+            "0,0,0,0,100,100,2,0,1,9,5,8,40,40,40,1",
             "",
             "[Events]",
             "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",

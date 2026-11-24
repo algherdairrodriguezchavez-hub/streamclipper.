@@ -546,19 +546,26 @@ ver_video = "qwen-3b"  #@param ["off", "qwen-3b", "qwen-7b"]
 #@markdown `hud = auto` también lee el HUD del juego (WASTED, estrellas). En GTA 6 es experimental y en un directo
 #@markdown largo revisa miles de fotogramas y puede añadir mucho tiempo, por eso viene apagado.
 hud = "off"  #@param ["off", "auto"]
-#@markdown **Estilo**
-caption_style = "auto"  #@param {STYLES}
-hook_style = "clean"  #@param {HOOKS}
+#@markdown `buscar_movimiento`: revisa todo el directo en baja calidad (una sola vez, se guarda) para encontrar
+#@markdown persecuciones o choques aunque el streamer no grite. Solo se usa con `ver_video` encendido.
+buscar_movimiento = True  #@param {type:"boolean"}
+#@markdown **Estilo** (`gta` = título estilo GTA; `gta-pop` = subtítulos grandes amarillos)
+caption_style = "gta-pop"  #@param {STYLES}
+hook_style = "gta"  #@param {HOOKS}
+#@markdown Texto que aparece tras el gancho inicial, cuando el clip vuelve atrás. Vacío = sin texto.
+texto_regreso = "UNOS SEGUNDOS ANTES..."  #@param {type:"string"}
 #@markdown `seam` = subtítulos y título en el centro, en la unión entre la cara y el gameplay (el título sale
 #@markdown primero, solo, unos segundos; después los subtítulos).
 caption_position = "seam"  #@param ["seam", "auto", "top", "center", "lower"]
 #@markdown **Cámara y gameplay** (se eligen en cada clip). `streamer` vacío = se usa el nombre del canal.
 #@markdown `siempre_dividido`: la cara del streamer arriba y el gameplay abajo en todos los clips.
 siempre_dividido = True  #@param {type:"boolean"}
-#@markdown `cam_fit = box`: el recuadro completo de la cámara del streamer (detectado solo). `tight`/`close`: más cerca de la cara.
+#@markdown `cam_fit = box`: el recuadro completo de la cámara del streamer (detectado solo).
+#@markdown `tight`/`close`: más cerca de la cara.
 cam_fit = "box"  #@param ["box", "standard", "tight", "close"]
 game_anchor = "center"  #@param ["side", "center"]
-#@markdown `seguir_accion`: el recorte del gameplay se mueve suave hacia donde hay movimiento (personajes, autos, disparos).
+#@markdown `seguir_accion`: el recorte del gameplay se mueve suave hacia donde hay movimiento
+#@markdown (personajes, autos, disparos).
 seguir_accion = True  #@param {type:"boolean"}
 cam_track = True  #@param {type:"boolean"}
 streamer = ""  #@param {type:"string"}
@@ -605,6 +612,8 @@ else:
             caption_position=caption_position,
             always_split=siempre_dividido,
             game_follow="action" if seguir_accion else "off",
+            rewind_label=texto_regreso.strip(),
+            motion_scan=bool(buscar_movimiento and ver_video != "off"),
         )
     except ToolError as e:
         print("ERROR:", e)

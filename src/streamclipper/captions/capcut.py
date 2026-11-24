@@ -574,6 +574,8 @@ def hook_capcut_fields(hook_style: str) -> dict:
         return {"font": "anton", "glow": False, "background": "#FFFFFF", "colour_map": {"white": "black"}}
     if hook_style == "minimal":
         return {"font": "anton", "glow": False, "colour_map": {}}
+    if hook_style == "gta":
+        return {"font": "bangers", "glow": False, "colour_map": {}}
     return {
         "font": "anton",
         "glow": False,

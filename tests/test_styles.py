@@ -76,9 +76,9 @@ def test_full_layout_captions_leave_a_low_face_clear(tmp_path):
     )
 
 
-def test_registry_has_15_styles_and_6_hook_styles():
-    assert len(STYLES) == 15
-    assert set(HOOK_STYLES) == {"bold-box", "outline-glow", "top-bar", "clean", "clean-light", "minimal"}
+def test_registry_has_16_styles_and_7_hook_styles():
+    assert len(STYLES) == 16
+    assert set(HOOK_STYLES) == {"bold-box", "outline-glow", "top-bar", "clean", "clean-light", "minimal", "gta"}
     for alias, target in STYLE_ALIASES.items():
         assert style_name(alias) == target
     assert style_name("nope") == ""
@@ -272,3 +272,36 @@ def test_seam_shows_the_title_first_then_the_captions_on_the_cam_line(tmp_path):
     doc = (tmp_path / "s.ass").read_text(encoding="utf-8")
     assert f"\\an5\\pos(540,{672 + SEAM_DOWN})" in doc  # title and captions centred on the cam line
     assert info["top_min"] >= 672 - SEAM_OVERLAP
+
+
+def test_gta_title_and_the_rewind_label_after_a_cold_open(tmp_path):
+    plan = _plan("gta-pop", _caps("gta-pop"), hook_style="gta", hook="PERSECUCIÓN ÉPICA")
+    plan["segments"] = [
+        {"src_s": 20.0, "src_e": 22.5, "tl_start": 0.0, "kind": "tease"},
+        {"src_s": 5.0, "src_e": 30.0, "tl_start": 2.5, "kind": "story"},
+    ]
+    plan["captions"][0]["tl_end"] = 2.5
+    plan["caption_opts"] = {"position": "auto", "rewind_label": "UNOS SEGUNDOS ANTES..."}
+    build_ass(plan, layout_boxes("9:16", "split"), tmp_path / "g.ass", FONTS)
+    doc = (tmp_path / "g.ass").read_text(encoding="utf-8")
+    assert "Style: HookGTA,Bangers" in doc and "\\frz" in doc
+    assert "ÉPICA" in doc and "&H00" in doc  # the last word in the accent colour
+    rewind = [ln for ln in doc.splitlines() if "UNOS SEGUNDOS ANTES" in ln]
+    assert len(rewind) == 1 and rewind[0].startswith("Dialogue: 4,0:00:02.50,0:00:03.80")
+    plan["caption_opts"] = {"position": "auto"}
+    build_ass(plan, layout_boxes("9:16", "split"), tmp_path / "n.ass", FONTS)
+    assert "SEGUNDOS" not in (tmp_path / "n.ass").read_text(encoding="utf-8")
+
+
+def test_cold_open_must_come_back_later():
+    from streamclipper.clipplan import _tease_bounds, cold_open_returns
+
+    words = [{"w": "x", "s": 10.0 + i * 0.4, "e": 10.3 + i * 0.4} for i in range(60)]
+    clip = {"peak": 30.0, "vision": {"peak": 30.0}}
+    a, b = _tease_bounds(clip, words, 5.0, 40.0)
+    assert 2.0 <= b - a <= 3.0 + 1e-6 and a < 30.0 < b <= 31.0  # builds into the moment, stops after it
+    a2, b2 = _tease_bounds({"peak": 30.0}, words, 5.0, 40.0)
+    assert b2 - a2 < b - a  # audio peak only: the shorter flash
+    tease = {"cut_start": a, "cut_end": b, "kind": "tease"}
+    assert cold_open_returns([tease, {"cut_start": 8.0, "cut_end": 35.0}])
+    assert not cold_open_returns([tease, {"cut_start": 8.0, "cut_end": 29.0}, {"cut_start": 31.0, "cut_end": 40.0}])

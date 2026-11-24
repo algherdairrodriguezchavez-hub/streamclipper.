@@ -423,3 +423,16 @@ def test_seam_captions_sit_on_the_cam_line():
     args = build_parser().parse_args(["clip-stream", "--input", "s.mp4", "--out", "w", "--caption-position", "seam",
                                       "--always-split"])  # fmt: skip
     assert args.caption_position == "seam" and args.always_split
+
+
+def test_contain_box_only_for_box_fit_with_another_shape():
+    from streamclipper.camfit import contain_box
+
+    cam = [0, 0, 412, 256]
+    four_three = {"cam_fit": "box", "ratio": "9:16", "cam_overlay": [0.0, 0.0, 0.25, 0.4444]}  # 480x480
+    got = contain_box(four_three, cam, 1920, 1080)
+    assert got is not None and got[:2] == [0, 0] and abs(got[2] - 480) <= 2 and abs(got[3] - 480) <= 2
+    assert contain_box(dict(four_three, cam_fit="standard"), cam, 1920, 1080) is None
+    assert contain_box(four_three, None, 1920, 1080) is None
+    same = {"cam_fit": "box", "ratio": "9:16", "cam_overlay": [0.0, 0.0, 412 / 1920, 256 / 1080]}
+    assert contain_box(same, cam, 1920, 1080) is None  # already the panel's shape: the normal crop

@@ -113,6 +113,19 @@ STYLES = {
         CaptionStyle("neon-glow", "2 words with a soft cyan glow", 2, "barlow", active="cyan", anim="neon", glow=True),
         CaptionStyle("impact-shake", "1 punchy word that shakes on impact", 1, "anton", 100, anim="shake"),
         CaptionStyle(
+            "gta-pop",
+            "2-3 condensed words, white with a heavy outline, spoken word yellow (game-poster look)",
+            3,
+            "anton",
+            90,
+            active="yellow",
+            hype="pink",
+            outline=8,
+            shadow=4,
+            anim="pop",
+            case="upper",
+        ),
+        CaptionStyle(
             "emoji-pop", "bold-pop plus a matching emoji (fire, skull, laughing...)", 2, "barlow", emoji=True, glow=True
         ),
         CaptionStyle("typewriter", "up to 4 words typed in one by one", 4, "poppins", 68, outline=5, anim="typewriter"),
@@ -182,6 +195,7 @@ HOOK_STYLES = {
     "clean": "white text on one rounded, dark translucent card, fade in (no colours)",
     "clean-light": "black text on one rounded white card, fade in (no colours)",
     "minimal": "white text with a thin dark outline and soft shadow, fade in (no box)",
+    "gta": "game-poster look: tilted brush letters, white with a thick black outline, last word yellow, pink swoosh",
 }
 CLEAN_HOOKS = ("clean", "clean-light", "minimal")
 

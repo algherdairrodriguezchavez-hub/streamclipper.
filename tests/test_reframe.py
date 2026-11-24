@@ -415,3 +415,35 @@ def test_caption_timing_across_segments(tmp_path):
         assert all(tl2[0] - 0.02 <= a and b <= tl2[1] + 0.02 for a, b, _t in evs), (w, evs)
     for w in ("ONE", "TWO"):
         assert all(b <= tl2[0] + 0.05 for a, b, t in events if w in t.upper() and "FOUR" not in t.upper())
+
+
+def test_cam_contain_is_kept_checked_and_drawn_over_its_own_blur(tmp_path):
+    s = seg(1, 9, layout="split", cam=CAM, game=SPLIT_GAME)
+    s["cam_contain"] = [20, 30, 480, 360]  # a 4:3 cam overlay
+    out = reframe.validate_segments([s], CTX, 1, 9)
+    assert out[0]["cam_contain"] == [20, 30, 480, 360]
+    bad = dict(s, cam_contain=[1700, 30, 480, 360])
+    with pytest.raises(ToolError):
+        reframe.validate_segments([bad], CTX, 1, 9)
+    full = dict(seg(1, 9), cam_contain=[20, 30, 480, 360])
+    assert "cam_contain" not in reframe.validate_segments([full], CTX, 1, 9)[0]
+    fc = reframe.build_panel_graph(out, 0.0, 10.0, "9:16", 1920, 1080)
+    assert "crop=480:360:20:30" in fc and "gblur=sigma=24" in fc and "force_original_aspect_ratio=decrease" in fc
+    assert "overlay=(W-w)/2:(H-h)/2" in fc and "vstack=2" in fc
+    if not shutil.which("ffmpeg"):
+        return
+    dst = tmp_path / "p.mp4"
+    cmd = ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=1920x1080:r=30:d=10", "-filter_complex"]
+    subprocess.run(cmd + [fc, "-map", "[v]", "-frames:v", "5", "-y", str(dst)], check=True)
+    assert dst.stat().st_size > 0
+
+
+def test_split_reframe_composite_keeps_the_seam_and_the_cam_line():
+    from streamclipper.layout import caption_anchor, layout_boxes, with_frame_layout
+
+    full = layout_boxes("9:16", "full")
+    assert with_frame_layout(full, None, "9:16") is full and with_frame_layout(full, "full", "9:16") is full
+    lay = with_frame_layout(full, "split", "9:16")
+    assert lay["frame_cam"] == [0, 0, 1080, 672] and "cam" not in lay["rects"]
+    assert lay["positions"]["seam"] == layout_boxes("9:16", "split")["positions"]["seam"]
+    assert caption_anchor(lay, "top")[1] >= 672 + 20  # never over the cam panel

@@ -7,7 +7,7 @@ from streamclipper.brand import load_brand_kit
 from streamclipper.captions.capcut import build_word_synced_captions, hook_capcut_fields
 from streamclipper.captions.styles import DEFAULT_HOOK_STYLE, clip_style, get_style
 from streamclipper.effects import any_on, check_effects, effects_of
-from streamclipper.layout import _norm_to_px, capcut_y, caption_anchor, layout_boxes
+from streamclipper.layout import _norm_to_px, capcut_y, caption_anchor, layout_boxes, with_frame_layout
 from streamclipper.story import _inside_word, grid_off_word, off_word
 from streamclipper.util import DRAFT_FPS, file_tag, fwd, run_cmd
 
@@ -54,6 +54,7 @@ def plan_clip_spec(
     if position != "auto":
         main_h = int(round(1920 * float(opts.get("main_ratio") or 0.55))) & ~1
         lay = layout_boxes(opts["ratio"], panels["layout"], main_h=main_h)
+        lay = with_frame_layout(lay, panels.get("frame_layout"), opts["ratio"])
         a, y_px = caption_anchor(lay, position, cstyle.anim_up)
         caption_y = capcut_y(a, y_px, lay["canvas"][1])
     caption_y = float(style.get("pos_y", caption_y))
@@ -304,9 +305,26 @@ def extract_window(src: Path, start: float, end: float, out_dir: Path) -> Path:
     return out
 
 
+def cold_open_returns(segs: list, tol: float = 0.05) -> bool:
+    """True when the cold open (segs[0], kind 'tease') shows again later inside a kept segment, so the viewer
+    arrives at the same moment with its context; a cold open whose moment was trimmed away is not used."""
+    t = segs[0]
+    return any(s["cut_start"] - tol <= t["cut_start"] and t["cut_end"] <= s["cut_end"] + tol for s in segs[1:])
+
+
 def _tease_bounds(clip: dict, words: list, lo: float, hi: float) -> tuple:
-    """Payoff flash [p-0.6, p+1.0] snapped to word boundaries, 1.2-2.0 s long, on the 1/30 s grid."""
+    """Payoff flash [p-0.6, p+1.0] snapped to word boundaries, 1.2-2.0 s long, on the 1/30 s grid. A moment the
+    vision model picked (clip['vision']['peak']) gets a cold open of 2-3 s that builds into the instant and stops
+    just after it, so the outcome is not given away."""
     p = clip["peak"]
+    vp = (clip.get("vision") or {}).get("peak")
+    if vp is not None and abs(float(vp) - float(p)) < 1e-6:
+        a = max(lo, grid_off_word(max(lo, p - 2.2), words, -1))
+        b = min(hi, grid_off_word(min(hi, p + 0.5), words, +1))
+        if b - a > 3.0:
+            a = max(lo, grid_off_word(b - 3.0, words, +1))
+        if b - a >= 2.0:
+            return a, b
     a = max(lo, off_word(max(lo, p - 0.6), words, -1))
     if _inside_word(a, words):  # the word starts before the window: start after it instead
         a = off_word(a, words, +1)
@@ -429,7 +447,9 @@ def make_clip_plan(
                 "caption_y",
                 "banner_y",
                 "caption_anchor",
+                "frame_layout",
             )
+            if k != "frame_layout" or panels.get(k)
         },
         "segments": [
             {
@@ -456,6 +476,7 @@ def make_clip_plan(
             "words": int(opts.get("words_per_caption") or 0),
             "emoji": opts.get("emoji"),
             "profanity_filter": bool(opts.get("profanity_filter")),
+            "rewind_label": opts.get("rewind_label") or "",
         },
         "hook_style": spec["caption_style"].get("hook_style") or opts.get("hook_style") or DEFAULT_HOOK_STYLE,
         "font": opts["font"],

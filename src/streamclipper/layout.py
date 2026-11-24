@@ -796,6 +796,18 @@ def full_caption_zone(panel: Path, dur: float, samples: int = 8) -> tuple:
     return speaker_caption_zone(shots, FULL_BANDS), f"a face on {hits}/{samples} frames"
 
 
+def with_frame_layout(lay: dict, frame_layout, ratio: str) -> dict:
+    """A reframe composite (one full-canvas panel) whose parts are all split: captions, title anchors and the
+    cam line come from the split layout (lay['frame_cam'] = the cam panel rect), the panel rects stay full."""
+    if not frame_layout or frame_layout == "full":
+        return lay
+    fl = layout_boxes(ratio, frame_layout)
+    out = dict(lay, caption=fl["caption"], positions=fl["positions"], hook=fl["hook"])
+    if fl["rects"].get("cam"):
+        out["frame_cam"] = fl["rects"]["cam"]
+    return out
+
+
 def apply_caption_anchor(lay: dict, anchor) -> dict:
     """The face-aware caption anchor (align, y) chosen at panel time replaces the layout default; the hook
     banner, which shares the caption zone in the full layout, moves with it."""
@@ -963,8 +975,10 @@ def render_reframe_panel(
         caption_y = capcut_y(anchor[0], anchor[1], H)
         banner_y = caption_y if anchor[1] < FULL_BANDS["upper"][0] else banner_y
     keys = sum(len(s.get("keys") or []) for s in segs)
+    kinds = {s["layout"] for s in segs}
     return {
         "layout": "full",
+        "frame_layout": kinds.pop() if len(kinds) == 1 else "full",  # captions and title follow a split frame
         "main_src": fwd(out),
         "main_pos_y": 0.0,
         "overlay_src": None,
@@ -1252,7 +1266,7 @@ def caption_anchor(lay: dict, position: str = "auto", anim_up: int = 0) -> tuple
         align, y = lay["positions"][position]
     else:
         align, y = lay["caption"]["align"], lay["caption"]["y"]
-    cam = (lay.get("rects") or {}).get("cam")
+    cam = (lay.get("rects") or {}).get("cam") or lay.get("frame_cam")
     if cam and align == 8:
         y = max(y, cam[1] + cam[3] + 20 + int(anim_up))
     return align, int(y)

@@ -164,7 +164,7 @@ def gate_mp4(path: Path, timeline_json: Path = None) -> list:
     if str(tl.get("layout") or "").startswith("speaker"):
         st, detail = check_speaker_faces(path, dur) or ("N/A", "no face detector installed")
         row("faces_whole", st != "FAIL", detail, st)
-    cam = (tl.get("rects") or {}).get("cam")
+    cam = (tl.get("rects") or {}).get("cam") or tl.get("frame_cam")  # frame_cam: a split reframe composite
     if not cam:
         row("captions_clear_of_face", True, f"layout {tl.get('layout')} has no cam panel", "N/A")
         row("face_panel", True, f"layout {tl.get('layout')} has no cam panel", "N/A")
@@ -204,6 +204,10 @@ def gate_mp4(path: Path, timeline_json: Path = None) -> list:
     else:
         row("streamer_clear", True, "no streamer box recorded", "N/A")
     main = (tl.get("rects") or {}).get("main")
+    fc = tl.get("frame_cam") if not (tl.get("rects") or {}).get("cam") else None
+    if main and fc:  # a split reframe composite: the gameplay is the part of the canvas below the cam panel
+        bottom = fc[1] + fc[3]
+        main = [main[0], bottom, main[2], main[1] + main[3] - bottom]
     if main:
         st, detail = check_panel_black(path, main)
         row("gameplay_black", st == "PASS", detail, st)

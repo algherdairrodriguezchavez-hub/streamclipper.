@@ -14,7 +14,7 @@ from streamclipper.captions.coverage import spoken_words_tl
 from streamclipper.captions.styles import FONT_FILES
 from streamclipper.effects import ENHANCE_MIX, effects_of, perspective_filter, zoom_plan_for
 from streamclipper.env import _first_line, ttf_full_name
-from streamclipper.layout import apply_caption_anchor, layout_boxes, probe_video
+from streamclipper.layout import apply_caption_anchor, layout_boxes, probe_video, with_frame_layout
 from streamclipper.paths import TEMPLATE_DIR
 from streamclipper.util import ToolError, fwd, run_cmd
 
@@ -316,7 +316,8 @@ def render_plan_mp4(plan: dict, out_mp4: Path) -> Path:
                 "re-run clip-stream/build for this clip (panels are cached in <out>/panels)",
             )
     mmeta = probe_video(main)
-    lay = apply_caption_anchor(layout_boxes(ratio, layout, main_h=mmeta["height"]), pn.get("caption_anchor"))
+    lay = layout_boxes(ratio, layout, main_h=mmeta["height"])
+    lay = apply_caption_anchor(with_frame_layout(lay, pn.get("frame_layout"), ratio), pn.get("caption_anchor"))
     W, H = lay["canvas"]
     if mmeta["width"] != W:
         raise ToolError(
@@ -655,6 +656,7 @@ def render_plan_mp4(plan: dict, out_mp4: Path) -> Path:
         "layout": layout,
         "canvas": lay["canvas"],
         "rects": lay["rects"],
+        "frame_cam": lay.get("frame_cam"),
         "panels": {"main": fwd(main), "overlay": fwd(overlay) if stacked else None},
         "caption": cap_info,
         "cam_box_px": (plan.get("boxes_px") or {}).get("cam"),

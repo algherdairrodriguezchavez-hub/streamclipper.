@@ -134,6 +134,8 @@ def test_auto_notebook_cells():
     assert "ytaccess.setup()" in code[0] and "ytaccess.diagnose(" in code[3] and ",youtube" in code[0]
     assert ",visualrank" in code[0] and "visual_rank=ver_video" in code[1] and "min_pause=" in code[1]
     assert "game_follow=" in code[1] and "always_split=siempre_dividido" in code[1]
+    assert 'hook_style = "gta"' in code[1] and 'caption_style = "gta-pop"' in code[1]
+    assert "rewind_label=texto_regreso" in code[1] and "motion_scan=bool(buscar_movimiento" in code[1]
     for i, src in enumerate(code, start=1):
         compile(src, f"cell {i}", "exec")
     assert "process_link(" in code[1] and 'enlace = ""  #@param' in code[1]

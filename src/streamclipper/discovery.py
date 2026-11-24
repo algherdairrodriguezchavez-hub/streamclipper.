@@ -101,6 +101,7 @@ def build_candidates(
     dur: float,
     transcribed: bool = None,
     hud=None,
+    motion=None,
 ) -> list:
     """
     Every candidate clip: voice peaks, chat spikes without a voice peak (at spike - 6 s), strong on-screen
@@ -122,6 +123,11 @@ def build_candidates(
         for ev in hud.strong(DEFAULT_BAR["hud_cue"]):
             if not any(ev["t"] - 15.0 <= pk["t"] <= ev["t"] + 5.0 for pk, _ in marks):
                 marks.append((peak_near(env, max(0.0, ev["t"] - 2.0), 2.0), ["hud"]))
+    if content != "talk":
+        # visual moments (motionscan): a chase or a crash the streamer did not shout about
+        for mv in motion or []:
+            if all(abs(mv["t"] - pk["t"]) >= sep / 2 for pk, _ in marks):
+                marks.append((peak_near(env, max(0.0, mv["t"] - 1.0), 2.0), ["motion"]))
     if content == "talk":
         llm_segs = [g for g in llm_segs or [] if llm_fits_transcript(g, words)]
         # podcasts: strong lines in the transcript are moments too, even when nobody gets loud
@@ -205,7 +211,8 @@ def select(cands: list, st: dict, counts: bool = False):
     else:
         base = TALK_BAR if st.get("content") == "talk" else DEFAULT_BAR
         bar = dict(base, min_score=min_score)
-        pool = [c for c in cands if passes_bar(c, bar)[0]]
+        # a visual moment (motion scan) may be quiet: half the bar, the vision model judges it later
+        pool = [c for c in cands if passes_bar(c, bar)[0] or ("motion" in c["sources"] and c["score"] >= min_score / 2)]
     key = (lambda c: (c["shock_contrast"], c["score"])) if st.get("rank_by") == "shock" else None
     max_clips = int(st.get("max_clips") or 0)
     picked = select_clips(pool, 0, max_clips, key)
@@ -285,6 +292,12 @@ def discover(
         from streamclipper.hud.analyze import keyframe_stage  # late import: HUD is optional
 
         hud = keyframe_stage(source, url, work_dir, state, st, title or source.stem, dur)
+    motion = []
+    if st.get("motion_scan") and (st.get("content") or "gaming") != "talk":
+        from streamclipper.motionscan import motion_stage
+
+        motion = motion_stage(source, url, work_dir, dur, max(st["max_dur"], 20.0))
+        state.set_stage("motion", {"moments": len(motion)})
     asr = _resolve_asr(st)
     max_clips = int(st.get("max_clips") or 0)
     # every peak is a candidate, except with --asr regions (each candidate costs a transcription)
@@ -296,7 +309,7 @@ def discover(
         chat_spikes = spikes(sig)
         state.set_stage("chat", {"messages": len(chat_msgs), "spikes": len(chat_spikes)})
         print(f"Chat replay: {len(chat_msgs)} messages, {len(chat_spikes)} spikes")
-    if not peaks and not chat_spikes and not (hud is not None and hud.strong(DEFAULT_BAR["hud_cue"])):
+    if not peaks and not chat_spikes and not motion and not (hud is not None and hud.strong(DEFAULT_BAR["hud_cue"])):
         raise ToolError(
             "No reaction peaks found (no moment is 6 dB above the stream's usual voice level).",
             "check that the commentary is audible in this video",
@@ -330,7 +343,20 @@ def discover(
             print(f"--llm {provider} needs a transcript (--asr full); skipped.")
 
     cands = build_candidates(
-        env, words, islands, laughs, peaks, sig, chat_spikes, llm_segs, heatmap, st, dur, transcribed=do_asr, hud=hud
+        env,
+        words,
+        islands,
+        laughs,
+        peaks,
+        sig,
+        chat_spikes,
+        llm_segs,
+        heatmap,
+        st,
+        dur,
+        transcribed=do_asr,
+        hud=hud,
+        motion=motion,
     )
     if hud is not None and hud.dense_n:
         print(f"HUD dense pass: {hud.dense_n} clip windows in {hud.dense_s:.0f} s")
@@ -485,6 +511,7 @@ def _discover_settings(args, transcribe) -> dict:
         "content": getattr(args, "content", None) or "gaming",
         "fresh": bool(getattr(args, "fresh", False)),
         "hud": getattr(args, "hud", None) or "off",
+        "motion_scan": bool(getattr(args, "motion_scan", False)),
         "hud_profile": str(Path(args.hud_profile).resolve()) if getattr(args, "hud_profile", None) else None,
     }
     if st["min_dur"] <= 0 or st["max_dur"] < st["min_dur"]:

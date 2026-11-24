@@ -384,6 +384,16 @@ def build_parser() -> argparse.ArgumentParser:
     cs.add_argument("--db", type=float, default=-48.0, help="RMS gate in dB")
     cs.add_argument("--min-pause", type=float, default=0.55, help="Pauses shorter than this stay inside a clip")
     cs.add_argument(
+        "--rewind-label",
+        default="",
+        help='Short label shown after the cold open while the clip goes back in time, e.g. "UNOS SEGUNDOS ANTES..."',
+    )
+    cs.add_argument(
+        "--motion-scan",
+        action="store_true",
+        help="Scan the whole stream's motion (low-res, once, cached) so quiet visual moments become candidates too",
+    )
+    cs.add_argument(
         "--game-follow",
         choices=("off", "action"),
         default="off",

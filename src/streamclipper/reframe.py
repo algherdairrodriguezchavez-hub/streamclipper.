@@ -236,6 +236,14 @@ def validate_segments(segs, ctx: dict, start: float, end: float) -> list:
                 "boundary": boundary,
             }
         )
+        cc = s.get("cam_contain")
+        if cc and layout == "split":  # the whole cam overlay, scaled to fit the cam panel (cam fit 'box')
+            if not (isinstance(cc, (list, tuple)) and len(cc) == 4):
+                raise ToolError(f"The cam frame of segment {n} is not valid.", "click Reset to auto-detected")
+            x, y, w, h = (int(round(_num(v, "The cam frame"))) for v in cc)
+            if w < 16 or h < 16 or x < 0 or y < 0 or x + w > vw or y + h > vh:
+                raise ToolError(f"The cam frame of segment {n} is outside the video.", "click Reset to auto-detected")
+            out[-1]["cam_contain"] = [x, y, w, h]
         prev = b
     if abs(prev - float(end)) > TOL:
         raise ToolError("The last segment must end where the clip ends.", "reload the editor")
@@ -374,10 +382,24 @@ def build_panel_graph(segs: list, ws: float, we: float, ratio: str, vw: int, vh:
         layout = seg["layout"]
         if layout == "split":
             (_c, _cx, _cy, _cw, cam_h), _g = panel_rects("split", ratio)
-            sharp = sharpen(seg["windows"]["cam"][2], W)
+            cc = seg.get("cam_contain")
+            if cc:  # the whole cam frame scaled to fit, its own blurred copy behind it (never gameplay)
+                x, y, w, h = cc
+                sharp = sharpen(W / max(1e-6, min(W / w, cam_h / h)), W)  # the fitted cam's zoom
+                cam_part = (
+                    f"[c{i}]crop={w}:{h}:{x}:{y},split=2[ca{i}][cb{i}];"
+                    f"[cb{i}]scale={W}:{cam_h}:force_original_aspect_ratio=increase,crop={W}:{cam_h},"
+                    f"gblur=sigma=24,eq=brightness=-0.12,setsar=1[cbg{i}];"
+                    f"[ca{i}]scale={W}:{cam_h}:force_original_aspect_ratio=decrease:force_divisible_by=2"
+                    f":flags=lanczos{sharp},setsar=1[cfg{i}];"
+                    f"[cbg{i}][cfg{i}]overlay=(W-w)/2:(H-h)/2,setsar=1[cc{i}];"
+                )
+            else:
+                sharp = sharpen(seg["windows"]["cam"][2], W)
+                cam_part = f"[c{i}]{crop('cam')},scale={W}:{cam_h}:flags=lanczos{sharp},setsar=1[cc{i}];"
             parts.append(
                 f"{src},split=2[c{i}][g{i}];"
-                f"[c{i}]{crop('cam')},scale={W}:{cam_h}:flags=lanczos{sharp},setsar=1[cc{i}];"
+                f"{cam_part}"
                 f"[g{i}]{crop('game')},scale={W}:{H - cam_h}:flags=lanczos,setsar=1[gg{i}];"
                 f"[cc{i}][gg{i}]vstack=2,format=yuv420p[v{i}]"
             )

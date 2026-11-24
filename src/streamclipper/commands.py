@@ -32,6 +32,7 @@ from streamclipper.clipplan import (
     LONG_TIMELINE_CAP,
     MAX_TIMELINE,
     _tease_bounds,
+    cold_open_returns,
     extract_window,
     fit_timeline,
     make_clip_plan,
@@ -363,6 +364,8 @@ def clip_stream(args) -> dict:
         opts["layout"] = "uncut-stack"
     if getattr(args, "always_split", False):  # the facecam on top and the gameplay below on every clip
         opts["always_split"] = True
+    if getattr(args, "rewind_label", ""):  # shown for 1.3 s after the cold open
+        opts["rewind_label"] = args.rewind_label
     if (getattr(args, "game_follow", "off") or "off") != "off":  # the gameplay crop follows the action
         opts["game_follow"] = args.game_follow
     if float(getattr(args, "max_dur", 60.0) or 60.0) > 60.0:  # long clips: the 59.5 s Shorts cap rises with max_dur
@@ -589,23 +592,30 @@ def decide_clip_layout(
     """_decide_clip_layout, then with opts game_follow == 'action' the gameplay crop follows the action
     (action.follow_segments: reframe keyframes from frame-to-frame motion, the cam and streamer masked out)."""
     o2, cam, game, note, rsegs = _decide_clip_layout(clip, win_file, wmeta, ws, opts, boxes, layout_ctx)
-    if opts.get("game_follow") != "action" or o2.get("layout") != "split":
+    follow = opts.get("game_follow") == "action"
+    contain = camfit.contain_box(o2, cam, wmeta["width"], wmeta["height"])
+    if o2.get("layout") != "split" or not (follow or contain):
         return o2, cam, game, note, rsegs
-    from streamclipper import action
-
     vw, vh = wmeta["width"], wmeta["height"]
+    multi = rsegs is not None
     if rsegs is None:
         if cam is None or game is None:
             return o2, cam, game, note, rsegs
         runs = [{"start": 0.0, "cam": cam, "game": game, "corner": None}]
         rsegs = camfit.runs_to_segments(runs, round(wmeta["dur"], 3), o2["ratio"], vw, vh)
-    masks = [o2[k] for k in ("person_box", "cam_overlay") if o2.get(k)]
-    try:
-        segs, how = action.follow_segments(rsegs, win_file, vw, vh, masks)
-    except Exception as e:  # noqa: BLE001 - motion analysis is a bonus: keep the fixed crop
-        print(f"Action following skipped ({type(e).__name__}: {e})")
-        return o2, cam, game, note, (rsegs if len(rsegs) > 1 else None)
-    if not any(s.get("keys") for s in segs) and len(segs) == 1:
+    segs, how = rsegs, ""
+    if follow:
+        from streamclipper import action
+
+        masks = [o2[k] for k in ("person_box", "cam_overlay") if o2.get(k)]
+        try:
+            segs, how = action.follow_segments(rsegs, win_file, vw, vh, masks)
+        except Exception as e:  # noqa: BLE001 - motion analysis is a bonus: keep the fixed crop
+            print(f"Action following skipped ({type(e).__name__}: {e})")
+    if contain and not multi:
+        segs = [dict(s, cam_contain=contain) if s.get("layout") == "split" else s for s in segs]
+        how = f"{how}; whole cam frame shown" if how else "whole cam frame shown"
+    if not multi and not contain and not any(s.get("keys") for s in segs):
         return o2, cam, game, f"{note}; {how}", None
     rctx = {"width": vw, "height": vh, "ratio": o2["ratio"]}
     segs = reframe.validate_segments(segs, rctx, 0.0, round(wmeta["dur"], 3))
@@ -804,7 +814,8 @@ def make_stream_clip(
         return {"cut_start": a, "cut_end": b, "kind": kind, "words": ws_in}
 
     segs = []
-    if opts["hook_mode"] == "tease-climax":
+    if opts["hook_mode"] == "tease-climax" and clip.get("tease_ok", True):
+        # the cold open: the clip's strongest instant first (the vision model's pick when it judged the clip)
         segs.append(piece(*_tease_bounds(clip, words, ws, we), "tease"))
     segs += [piece(s["src_s"], s["src_e"], s["kind"]) for s in clip["segments"]]
     if panels.get("speaker_note"):  # podcasts: B-roll often fades through black between sentences
@@ -814,6 +825,9 @@ def make_stream_clip(
     verbatim = (win_file, ws, 0.0, wmeta["dur"], asr, work_dir / "analysis")
     segs, words, removed = _apply_fillers(segs, words, clip["peak"], opts, f"Clip {idx + 1}", verbatim, ws)
     segs = fit_timeline(segs, words, opts.get("max_timeline") or MAX_TIMELINE)
+    if segs and segs[0].get("kind") == "tease" and not cold_open_returns(segs):
+        print(f"Clip {idx + 1}: cold open dropped (its moment is not in the rest of the clip)")
+        segs = segs[1:]
     hook = hook_override or clip["hook_headline"]
     if opts.get("profanity_filter"):
         hook = " ".join(mask_profanity(w) for w in hook.split(" "))

@@ -168,6 +168,10 @@ def _clip_argv(source: str, work: Path, o: dict) -> list:
         argv += ["--caption-position", str(o["caption_position"])]
     if o.get("always_split"):
         argv.append("--always-split")
+    if o.get("rewind_label"):
+        argv += ["--rewind-label", str(o["rewind_label"])]
+    if o.get("motion_scan"):
+        argv.append("--motion-scan")
     if (o.get("game_follow") or "off") != "off":
         argv += ["--game-follow", str(o["game_follow"])]
     if (o.get("visual_rank") or "off") != "off":
@@ -229,6 +233,8 @@ def run_pipeline(
     caption_position: str = "auto",
     always_split: bool = False,
     game_follow: str = "off",
+    rewind_label: str = "",
+    motion_scan: bool = False,
 ) -> dict:
     """
     Stream -> ranked clips (clips.json, clips.csv, index.html) -> MP4s + thumbnails (render) -> portable
@@ -248,7 +254,9 @@ def run_pipeline(
     title centred on the line between the facecam and the gameplay; the title shows first, alone).
     always_split=True keeps the facecam on top and the gameplay below on every clip with a face;
     game_follow='action' moves the gameplay crop smoothly to where the action is. cam_fit='box' shows the
-    whole detected cam frame.
+    whole detected cam frame. rewind_label = the short text shown after the cold open ("UNOS SEGUNDOS
+    ANTES..."). motion_scan=True scans the stream's motion once (low-res, cached) so quiet visual moments
+    (a chase the streamer did not shout about) become candidates for the vision model.
     None of these change the saved transcript.
     """
     from streamclipper.cli import build_parser  # late import: cli imports every command module
@@ -296,6 +304,8 @@ def run_pipeline(
         "caption_position": caption_position or "auto",
         "always_split": bool(always_split),
         "game_follow": game_follow or "off",
+        "rewind_label": str(rewind_label or "").strip(),
+        "motion_scan": bool(motion_scan),
     }
     if opts["brand_kit"] and not Path(opts["brand_kit"]).is_file():
         raise ToolError("The brand kit file was not found.", "check the brand_kit path, or leave it empty")
